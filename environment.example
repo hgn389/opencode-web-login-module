@@ -1,4 +1,5 @@
 # Default: access on this machine only. Set the LAN IP explicitly when needed.
+# For LAN access, replace the sample name IP_SERVER with your actual server IP.
 LOGIN_HOST=127.0.0.1
 LOGIN_PORT=4096
 OPENCODE_BACKEND_HOST=127.0.0.1

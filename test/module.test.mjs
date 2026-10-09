@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { once } from 'node:events';
 import { createLoginServer, configFromEnv, normalizeConfig } from '../index.mjs';
+import { loginAddress } from '../config.mjs';
 
 test('import has no server or database side effects', () => {
   const dir = mkdtempSync(join(tmpdir(), 'opencode-import-'));
@@ -48,12 +49,24 @@ test('a module instance can listen and close without exiting its caller', async 
     await login.listen();
     const response = await fetch(`http://127.0.0.1:${port}/login`);
     assert.equal(response.status, 200);
-    assert((await response.text()).includes('Đăng nhập'));
+    const body = await response.text();
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    assert(body.includes('Đăng nhập'));
+    assert(body.includes(`OpenCode Web Login · v${version}`));
+    assert(!body.includes('{{VERSION}}'));
     await login.close();
     await login.close();
     assert.equal(login.server.listening, false);
     await assert.rejects(login.listen(), /closed/);
   } finally { await login.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('installation login address preserves configured port and uses a sample name for wildcard binding', () => {
+  assert.equal(loginAddress(normalizeConfig({ host: '0.0.0.0', port: 6699 })), 'http://IP_SERVER:6699/login');
+  assert.equal(loginAddress(normalizeConfig({ host: '::', port: 6700 })), 'http://IP_SERVER:6700/login');
+  assert.equal(loginAddress(normalizeConfig({ host: '127.0.0.1', port: 6699 })), 'http://127.0.0.1:6699/login');
+  assert.equal(loginAddress(normalizeConfig({ host: '::1', port: 6699 })), 'http://[::1]:6699/login');
+  assert.equal(loginAddress(normalizeConfig({ host: '0.0.0.0', port: 6699, publicOrigins: ['https://login.example'] })), 'https://login.example/login');
 });
 
 test('installer dry-run creates a portable, hardened plan without touching files', () => {

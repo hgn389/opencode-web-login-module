@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import net from 'node:net';
-import { normalizeConfig } from './config.mjs';
+import { normalizeConfig, loginAddress } from './config.mjs';
 import { readResponse, protectedBackend } from './http-client.mjs';
 import { moduleFiles } from './update.mjs';
 
@@ -304,7 +304,7 @@ WantedBy=multi-user.target
     for (let attempt = 0; attempt < 50; attempt++) {
       if (isActive(`${name}.service`) && isActive(`${name}-admin.service`) && isActive(backendService) && await ready(config)) {
         rmSync(oldDependencies, { recursive: true, force: true });
-        console.log(JSON.stringify({ installed: true, service: `${name}.service`, config: envPath, gateway: config.localOrigin, backup: snapshot.repo }, null, 2));
+        console.log(JSON.stringify({ installed: true, service: `${name}.service`, config: envPath, gateway: config.localOrigin, loginURL: loginAddress(config), backup: snapshot.repo }, null, 2));
         return plan;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));

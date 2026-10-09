@@ -4,9 +4,9 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
 
-**Bản thử nghiệm:** [v.1.0.0 beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.0.0-beta). Phiên bản gói: `1.0.0-beta`.
+**Bản thử nghiệm:** [v1.1.0-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.0-beta). Phiên bản gói: `1.1.0-beta`.
 
-**Nhánh `main` có thêm menu đổi mật khẩu và cập nhật qua web. Các tính năng này chưa nằm trong gói beta đã phát hành; cài từ `main` theo hướng dẫn dưới đây để sử dụng.**
+**Bản này bao gồm menu đổi mật khẩu OpenCode và cập nhật Web Login Module qua web. Tự động cập nhật mặc định tắt.**
 
 ## Cài đặt và cấu hình
 
@@ -34,21 +34,21 @@ Ghi lại đường dẫn binary từ `command -v opencode` và tên dịch vụ
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone --branch main https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch v1.1.0-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
-sudo npm ci --omit=dev
+sudo npm ci --omit=dev --ignore-scripts
 node bin/opencode-web-login.mjs --help
 ```
 
-Lệnh clone trên lấy mã mới nhất ở `main`, có thể có thay đổi chưa phát hành. Nếu muốn đúng bản beta đã phát hành, thay `--branch main` bằng `--branch v1.0.0-beta`; bản này chưa có menu quản trị mới. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy đúng bản beta đã phát hành, có menu quản trị mới. Nếu muốn mã đang phát triển, thay `--branch v1.1.0-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
 
 #### Cài từ gói `.tgz` trên GitHub Release
 
-Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.0.0-beta.tgz` và `opencode-web-login-1.0.0-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.0.0-beta). Trong thư mục đã tải, chạy:
+Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.1.0-beta.tgz` và `opencode-web-login-1.1.0-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.0-beta). Trong thư mục đã tải, chạy:
 
 ```sh
-sha256sum --check opencode-web-login-1.0.0-beta.tgz.sha256
-sudo npm install -g ./opencode-web-login-1.0.0-beta.tgz
+sha256sum --check opencode-web-login-1.1.0-beta.tgz.sha256
+sudo npm install -g ./opencode-web-login-1.1.0-beta.tgz
 opencode-web-login --help
 ```
 
@@ -79,7 +79,7 @@ sudo node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install \
   --backend-port 4097
 ```
 
-**Truy cập từ máy khác trong LAN:** thay `--host 127.0.0.1` trong cả hai lệnh bằng IP LAN của máy chủ, ví dụ `--host 192.168.1.150`. Cho phép cổng `4096` trong firewall cho mạng LAN cần sử dụng. Module không tự mở firewall.
+**Truy cập từ máy khác trong LAN:** thay `--host 127.0.0.1` trong cả hai lệnh bằng IP LAN của máy chủ, `--host IP_SERVER` (`IP_SERVER` là giá trị mẫu, cần thay bằng IP của máy đích). Cho phép cổng `4096` trong firewall cho mạng LAN cần sử dụng. Module không tự mở firewall.
 
 Bộ cài sẽ:
 
@@ -103,7 +103,9 @@ sudo node /opt/opencode-login/bin/opencode-web-login.mjs doctor --config /etc/op
 Mở một trong các địa chỉ phù hợp với `--host` đã cấu hình:
 
 - Chỉ dùng trên máy chủ: `http://127.0.0.1:4096/login`.
-- Dùng trong LAN với IP ví dụ phía trên: `http://192.168.1.150:4096/login`.
+- Dùng trong LAN: `http://IP_SERVER:4096/login`; thay `IP_SERVER` bằng IP của máy đích.
+
+Sau khi cài thành công, bộ cài in trường `loginURL` với đúng cổng vừa cấu hình. Khi bind tất cả interface (`0.0.0.0` hoặc `::`), thông báo dùng `http://IP_SERVER:CỔNG_THỰC_TẾ/login` để bạn thay IP; nếu đã cấu hình domain HTTPS, thông báo dùng domain đó. Với cổng tùy chọn `6699`, ví dụ thông báo là `http://IP_SERVER:6699/login`, không dùng chữ `PORT` trong kết quả cài đặt. Các giá trị này được sinh từ cấu hình trên máy đích, không lưu trong mã nguồn.
 
 Nhập tài khoản/mật khẩu OpenCode. Khi đăng nhập thành công, trình duyệt chuyển vào OpenCode. Trang đăng xuất nằm ở `/logout`.
 
@@ -120,11 +122,11 @@ Trên điện thoại, hai nút xuất hiện ngay dưới thanh điều hướn
 
 Menu được tích hợp bằng script do gateway phục vụ trên cùng origin, không sửa tệp OpenCode. Bản OpenCode hiện tại chỉ nạp các trang cài đặt GUI tích hợp sẵn, chưa nạp renderer của extension bên ngoài; vì vậy đây là phần tích hợp của Web Login Module, không phải plugin GUI chính thức. Tích hợp menu áp dụng cho giao diện truy cập qua gateway.
 
-**Mặc định:** cập nhật thủ công, kênh bản ổn định. Khi bật tự động, dịch vụ kiểm tra mỗi giờ. Bộ cập nhật chỉ nhận phiên bản cao hơn từ GitHub Release đã công bố của `hgn389/opencode-web-login-module`, xác minh SHA-256 theo GitHub API, kiểm tra nội dung gói và thư viện đã khóa, rồi gọi bộ cài có sao lưu và khôi phục. Không tải mã từ `main`, không hạ phiên bản, không cập nhật OpenCode và không tạo bản phát hành trên GitHub. Bản beta hiện tại sẽ không bị tải xuống cài đè lên chính nó.
+**Mặc định:** cập nhật thủ công, kênh bản ổn định. Khi bật tự động, dịch vụ kiểm tra mỗi giờ. Bộ cập nhật chỉ nhận phiên bản cao hơn từ GitHub Release đã công bố của `hgn389/opencode-web-login-module`, xác minh SHA-256 theo GitHub API, kiểm tra nội dung gói và thư viện đã khóa, rồi gọi bộ cài có sao lưu và khôi phục. Không tải mã từ `main`, không hạ phiên bản, không cập nhật OpenCode và không tạo bản phát hành trên GitHub. Bộ cập nhật không tải một phiên bản bằng hoặc thấp hơn bản đang cài.
 
 Yêu cầu giả mạo origin/CSRF bị từ chối. Nhập sai mật khẩu xác nhận cũng tính vào bộ đếm IP: đến 5 lần sẽ yêu cầu đăng nhập lại với CAPTCHA, đến 10 lần khóa IP. Mật khẩu mới không được ghi vào log hoặc repository công khai.
 
-Nếu đang dùng bản module cũ, lấy `main` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
+Nếu đang dùng bản module cũ, lấy tag `v1.1.0-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
 
 ### 5. Thay đổi cấu hình sau khi cài
 
@@ -267,23 +269,31 @@ Trên Linux, thư mục cơ sở dữ liệu phải thuộc người chạy dị
 
 Repository chính: [hgn389/opencode-web-login-module](https://github.com/hgn389/opencode-web-login-module), nhánh `main`.
 
-Sau khi hoàn tất một lần sửa mã nguồn, chạy kiểm tra phù hợp, commit và push lên GitHub. Thay `duong-dan/tep-da-sua` bằng những tệp thực tế đã sửa:
+Sau khi sửa mã nguồn hoặc lệnh cài đặt, cập nhật README và chạy kiểm tra:
 
 ```sh
-git switch main
-git pull --ff-only origin main
-npm ci
+npm ci --ignore-scripts
 npm test
 git diff --check
-git add duong-dan/tep-da-sua
-git commit -m "Mo ta thay doi"
-git push origin main
+git status --short
 ```
 
-**Commit/push chỉ cập nhật mã nguồn. Chỉ phát hành phiên bản mới khi chủ repository xác nhận rõ ràng.** Trước khi có xác nhận, không tự tăng version, tạo/push tag phiên bản, tạo GitHub Release, đưa gói lên npm hoặc tải lên tệp phát hành.
+**Chỉ commit, push hoặc phát hành khi chủ repository ra lệnh rõ ràng.** Chạy kiểm tra không đồng nghĩa với được phép đưa thay đổi lên GitHub. Không tự tăng phiên bản, tạo/push tag, tạo GitHub Release, đưa gói lên npm hoặc tải lên tệp phát hành.
+
+Khi được lệnh đổi phiên bản, cập nhật đồng bộ `package.json`, `npm-shrinkwrap.json`, README và các ghi chú. Footer của trang đăng nhập và trang quản trị lấy số phiên bản trực tiếp từ `package.json`, tránh có một số phiên bản riêng bị quên cập nhật.
 
 `git push` không tự cập nhật dịch vụ trên máy đã cài. Muốn áp dụng mã nguồn mới lên một máy, cập nhật bản clone tại `/opt/opencode-web-login-src`, rồi chạy lại bộ cài với đầy đủ tùy chọn đã dùng trên máy đó.
 
-Các quy tắc làm việc được ghi trong [AGENTS.md](AGENTS.md). Không commit file env chứa bí mật, cơ sở dữ liệu, khóa riêng, log hoặc thư mục `node_modules`. Bản sao lưu cấu hình trên máy chủ nằm ngoài repository công khai này.
+### Dữ liệu mẫu và bảo vệ thông tin khi đưa lên GitHub
+
+- `IP_SERVER` là tên mẫu để thay bằng IP của máy đích; `PORT` là cổng được chọn khi cài. Ví dụ tổng quát: `http://IP_SERVER:PORT/login`. Với cổng mặc định của module: `http://IP_SERVER:4096/login`.
+- Các lệnh dùng `127.0.0.1`/`::1` vì backend cần nghe ở loopback; đây là địa chỉ kỹ thuật dùng chung, không phải IP riêng của một máy chủ.
+- Domain trong ví dụ là domain dành cho tài liệu. Repository chính thức và tài khoản chủ repository trong đường dẫn GitHub là thông tin công khai cần cho clone/cập nhật; không phải tài khoản đăng nhập OpenCode.
+- Không đưa mật khẩu, token, cấu hình env thực tế, cấu hình quản trị `*-admin.json`, cơ sở dữ liệu/WAL/SHM, khóa riêng, log, ảnh chụp panel, bản sao lưu hoặc thư viện `node_modules` lên GitHub. `.gitignore` loại các tệp vận hành phổ biến; cần kiểm tra thêm tệp đã được theo dõi trong Git trước khi upload.
+- Mật khẩu/token trong test là dữ liệu giả, chỉ dùng với dịch vụ và dữ liệu thử nghiệm riêng.
+- Quy tắc làm việc nội bộ chỉ lưu tại máy, không nằm trong danh sách tệp công khai hoặc gói cài đặt.
+- Tệp đã từng đưa lên GitHub có thể còn trong lịch sử Git hoặc gói phát hành cũ dù đã sửa bản hiện tại. Nếu phát hiện bí mật đã bị công khai, đổi/thu hồi bí mật đó trước rồi xử lý lịch sử và tài sản phát hành theo lệnh của chủ repository.
+
+Bản sao lưu cấu hình trên máy chủ nằm ngoài repository công khai, có quyền truy cập riêng và có thể chứa thông tin đăng nhập. Không đính kèm bản sao lưu vào issue hoặc release.
 
 Test dùng cơ sở dữ liệu tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Bản chạy thực tế không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Các tài nguyên CAPTCHA và giấy phép font được lưu cùng mã nguồn.

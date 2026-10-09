@@ -58,3 +58,9 @@ export function configFromEnv(env = process.env) {
     trustedProxies: env.LOGIN_TRUSTED_PROXIES === undefined ? undefined : list(env.LOGIN_TRUSTED_PROXIES),
   });
 }
+
+export function loginAddress(config) {
+  if (config.publicOrigins.length) return config.publicOrigins[0] + '/login';
+  if (['0.0.0.0', '::'].includes(config.host)) return `http://IP_SERVER:${config.port}/login`;
+  return config.localOrigin + '/login';
+}

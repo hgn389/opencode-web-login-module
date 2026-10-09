@@ -205,7 +205,12 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
     assert.equal(calls, 1);
     const html = await (await request('/', { headers: { accept: 'text/html' } })).text();
     assert(html.includes('/web-login/settings-hook.js')); assert(html.includes('/web-login/settings-hook.css'));
-    assert.equal((await request('/web-login/password')).headers.get('x-frame-options'), 'SAMEORIGIN');
+    const panel = await request('/web-login/password');
+    assert.equal(panel.headers.get('x-frame-options'), 'SAMEORIGIN');
+    const panelBody = await panel.text();
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    assert(panelBody.includes(`OpenCode Web Login · v${version}`));
+    assert(!panelBody.includes('{{VERSION}}'));
     assert.equal((await request('/web-login/admin-ui.js')).status, 200);
     const wrong = await request('/web-login/api/password', { ...options, body: JSON.stringify({ password: 'native_fixture_token', newPassword: nextPassword, confirmPassword: nextPassword }) });
     assert.equal(wrong.status, 401); assert.equal(store.state('127.0.0.1').failures, 1);

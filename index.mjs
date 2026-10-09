@@ -24,8 +24,9 @@ export function createLoginServer(options = {}) {
     else trustedProxies.addAddress(ip, family);
   }
   const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
+  const { version: moduleVersion } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
   const loginScript = readFileSync(new URL('./login-client.js', import.meta.url), 'utf8');
-  const adminPage = readFileSync(new URL('./admin.html', import.meta.url), 'utf8');
+  const adminPage = readFileSync(new URL('./admin.html', import.meta.url), 'utf8').replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
   const adminAssets = new Map(['admin-ui.js', 'settings-hook.js', 'settings-hook.css'].map(file => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const state = new SecurityStore(config.statePath);
   const shutdown = new AbortController();
@@ -133,7 +134,7 @@ export function createLoginServer(options = {}) {
     }
     const body = template.replace('{{MESSAGE}}', escapeHtml(message)).replace('{{CSRF}}', csrf)
       .replace('{{NEXT}}', escapeHtml(safeNext(next, ctx))).replace('{{CAPTCHA}}', captcha)
-      .replace('{{FORM_STATE}}', locked ? 'disabled' : '');
+      .replace('{{FORM_STATE}}', locked ? 'disabled' : '').replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
     res.writeHead(status, {
       ...responseHeaders(ctx),
       'content-security-policy': "default-src 'none'; img-src 'self'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",

@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { configFromEnv } from './config.mjs';
+import { configFromEnv, loginAddress } from './config.mjs';
 import { protectedBackend } from './http-client.mjs';
 
 const usage = `OpenCode Web Login
@@ -39,6 +39,7 @@ export async function runCLI(args = process.argv.slice(2)) {
     const login = createLoginServer(config);
     try { await login.listen(); } catch (error) { await login.close(); throw error; }
     console.log(`OpenCode web sign-in listening on ${config.localOrigin}`);
+    console.log(`Sign-in page: ${loginAddress(config)}`);
     let stopping = false;
     const stop = async () => {
       if (stopping) return;

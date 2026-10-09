@@ -9,3 +9,11 @@ dist/
 *.pem
 *.p12
 *.tgz
+AGENTS.md
+*-admin.json
+*.bak
+*.backup
+backup/
+backups/
+logs/
+screenshots/
