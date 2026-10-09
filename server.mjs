@@ -18,7 +18,7 @@ const safeHeaders = {
   'cache-control': 'no-store',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
-  'referrer-policy': 'no-referrer',
+  'referrer-policy': 'same-origin',
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
 };
 
