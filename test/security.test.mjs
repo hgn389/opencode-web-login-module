@@ -90,10 +90,12 @@ async function stop(child) {
   const port = await freePort();
   let nativeAuthorized = true;
   let calls = 0;
+  let verificationGate, enteredVerification, releaseVerification;
   const backend = http.createServer(async (req, res) => {
     if (req.url === '/api/info') {
       calls += 1;
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      if (verificationGate) { enteredVerification(); await verificationGate; }
+      else await new Promise((resolve) => setTimeout(resolve, 30));
       const accepted = req.headers.authorization === auth(goodPassword) || (nativeAuthorized && req.headers.authorization === auth(nativeToken));
       res.writeHead(accepted ? 200 : 401, { 'content-type': 'application/json' });
       res.end(JSON.stringify(accepted ? { pid: 123, version: 'test' } : { message: 'Authentication required' }));
@@ -178,8 +180,14 @@ async function stop(child) {
     const parallel = { ip: '198.51.100.40' };
     const entry = fields(await request(port, '/login', parallel));
     const data = new URLSearchParams({ username: 'opencode', password: 'wrong-password', csrf: entry.csrf }).toString();
-    const responses = await Promise.all(Array.from({ length: 12 }, () => request(port, '/login', { ...parallel, method: 'POST', data, cookie: entry.cookie })));
-    assert(responses.some((r) => r.status === 429));
+    const entered = new Promise(resolve => { enteredVerification = resolve; });
+    verificationGate = new Promise(resolve => { releaseVerification = resolve; });
+    const first = request(port, '/login', { ...parallel, method: 'POST', data, cookie: entry.cookie });
+    await entered;
+    const responses = await Promise.all(Array.from({ length: 11 }, () => request(port, '/login', { ...parallel, method: 'POST', data, cookie: entry.cookie })));
+    assert(responses.every((r) => r.status === 429));
+    releaseVerification(); verificationGate = undefined;
+    assert.equal((await first).status, 401);
     assert.equal(row(parallel.ip).failures, 1);
     console.log('Verified trusted proxy boundaries and serialized password verification per IP');
 
@@ -211,6 +219,7 @@ async function stop(child) {
     assert.equal(limited.headers['retry-after'], '60');
     console.log('Verified HTTP-to-HTTPS redirect, refusal of plaintext domain submissions, and request throttling');
   } finally {
+    releaseVerification?.();
     await stop(child);
     db.close();
     await new Promise((resolve) => backend.close(resolve));

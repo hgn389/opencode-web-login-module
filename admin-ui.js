@@ -4,7 +4,7 @@
   const passwordPage = location.pathname.endsWith('/password');
   document.querySelector(passwordPage ? '#password-page' : '#updates-page').hidden = false;
   document.title = `${passwordPage ? 'Đổi mật khẩu' : 'Cập nhật Web Login Module'} · OpenCode`;
-  let csrf, busy = false, available = false, timer;
+  let csrf, busy = false, available = false, timer, reconnecting = false;
   const message = text => { notice.textContent = text; };
   async function call(operation, fields) {
     const response = await fetch(`/web-login/api/${operation}`, {
@@ -17,8 +17,22 @@
       message('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
       setTimeout(() => { window.top.location.href = '/login'; }, 1500);
     }
-    if (!response.ok) throw new Error(data.message || 'Không xử lý được yêu cầu.');
+    if (!response.ok) throw Object.assign(new Error(data.message || 'Không xử lý được yêu cầu.'), { status: response.status });
     return data;
+  }
+  function scheduleRefresh(delay = 3000) {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        await refresh();
+        if (reconnecting) { reconnecting = false; message('Đã kết nối lại với dịch vụ.'); }
+      } catch (error) {
+        if ([401, 403].includes(error.status)) { message(error.message); return; }
+        reconnecting = true;
+        message('Tạm mất kết nối với dịch vụ. Đang chờ kết nối lại để kiểm tra kết quả cập nhật.');
+        scheduleRefresh(error.status === 429 ? 60000 : 5000);
+      }
+    }, delay);
   }
   function draw(data) {
     if (data.csrf) csrf = data.csrf;
@@ -44,7 +58,7 @@
     form.querySelector('[name=install]').disabled = busy || !data.release || running;
     document.querySelector('#job').textContent = data.job?.message || '';
     clearTimeout(timer);
-    if (running) timer = setTimeout(() => refresh().catch(() => { timer = setTimeout(() => refresh().catch(() => {}), 5000); }), 3000);
+    if (running) scheduleRefresh();
   }
   async function refresh() { draw(await call('status')); }
   document.querySelector('#check-update').addEventListener('click', async event => {

@@ -8,6 +8,7 @@ import net from 'node:net';
 import { normalizeConfig, loginAddress } from './config.mjs';
 import { readResponse, protectedBackend } from './http-client.mjs';
 import { moduleFiles } from './update.mjs';
+import { protectBackendPassword } from './admin-service.mjs';
 
 const source = dirname(fileURLToPath(import.meta.url));
 const files = moduleFiles;
@@ -266,6 +267,7 @@ WantedBy=multi-user.target
   const oldDependencies = join(staging, 'previous-node_modules');
   let changed = false;
   let replacedDependencies = false;
+  let restorePassword;
   try {
     for (const file of files) {
       const dest = join(staging, file);
@@ -274,6 +276,7 @@ WantedBy=multi-user.target
       chmodSync(dest, file.startsWith('bin/') ? 0o755 : 0o644);
     }
     execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: staging, stdio: 'inherit' });
+    restorePassword = protectBackendPassword({ name, backendService });
     if (!account) command('useradd', ['--system', '--user-group', '--home-dir', `/var/lib/${name}`, '--shell', '/usr/sbin/nologin', name]);
     changed = true;
     if (loginWasActive || existsSync(servicePath)) command('systemctl', ['stop', `${name}.service`]);
@@ -319,6 +322,7 @@ WantedBy=multi-user.target
         if (!loginWasEnabled) command('systemctl', ['disable', `${name}.service`]);
         if (!adminWasEnabled) command('systemctl', ['disable', `${name}-admin.service`]);
         restore(snapshot);
+        restorePassword?.();
         if (replacedDependencies) {
           rmSync(join(directory, 'node_modules'), { recursive: true, force: true });
           if (existsSync(oldDependencies)) renameSync(oldDependencies, join(directory, 'node_modules'));
@@ -334,6 +338,8 @@ WantedBy=multi-user.target
         else if (existsSync(servicePath)) command('systemctl', ['stop', `${name}.service`]);
         rollback = 'Previous files, dependencies and service state restored';
       } catch { rollback = 'Automatic restoration failed; restore from the Git backup'; }
+    } else if (restorePassword) {
+      restorePassword(); command('systemctl', ['daemon-reload']);
     }
     throw new Error(`Installation failed: ${error.message}. ${rollback}. Configuration backups: ${snapshot.repo}`, { cause: error });
   } finally {

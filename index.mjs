@@ -1,7 +1,8 @@
 import http from 'node:http';
 import net from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { readFileSync } from 'node:fs';
-import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto';
 import { SecurityStore } from './security.mjs';
 import { readResponse } from './http-client.mjs';
 import { adminCall } from './admin-client.mjs';
@@ -14,6 +15,13 @@ export function createLoginServer(options = {}) {
   const config = normalizeConfig(options);
   const { host: hostname, port, backendPort, backendHost, authority, localOrigin: lanOrigin } = config;
   const allowedOrigins = new Set([lanOrigin, ...config.publicOrigins]);
+  if (['0.0.0.0', '::'].includes(hostname)) {
+    for (const item of Object.values(networkInterfaces()).flat()) {
+      const address = item.address;
+      if (address.includes('%') || (hostname === '0.0.0.0' && net.isIP(address) !== 4)) continue;
+      allowedOrigins.add(new URL(`http://${net.isIP(address) === 6 ? `[${address}]` : address}:${port}`).origin);
+    }
+  }
   const trustedProxies = new net.BlockList();
   for (const address of config.trustedProxies) {
     const [ip, bits] = address.split('/');
@@ -154,6 +162,12 @@ export function createLoginServer(options = {}) {
   function backend(path, method = 'GET', headers = {}) {
     return readResponse({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, { signal: shutdown.signal });
   }
+  async function changingPassword() {
+    if (!config.adminSocket) return false;
+    const result = await adminCall(config.adminSocket, 'status', {}, { signal: shutdown.signal });
+    if (result.status !== 200) throw new Error('Administration unavailable');
+    return result.job?.type === 'password' && ['starting', 'running'].includes(result.job.phase);
+  }
 
   async function login(req, res, ctx) {
     if (req.headers.origin !== ctx.origin || req.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') {
@@ -181,6 +195,8 @@ export function createLoginServer(options = {}) {
     }
     if (!state.begin(ctx.ip)) return page(req, res, ctx, 429, 'Yêu cầu trước đang được xử lý. Vui lòng thử lại.', next);
     try {
+      const revision = state.sessionRevision();
+      if (await changingPassword()) return page(req, res, ctx, 503, 'Đang đổi mật khẩu và khởi động lại OpenCode. Vui lòng chờ rồi đăng nhập lại.', next);
       const account = state.state(ctx.ip);
       if (account.blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.', next);
       if (account.failures >= 5 && !state.verifyChallenge(csrf, ctx.ip, (fields.get('captcha') || '').trim().toUpperCase())) {
@@ -210,8 +226,10 @@ export function createLoginServer(options = {}) {
       if (session.status !== 200) throw new Error('Session unavailable');
       const { token } = JSON.parse(session.body);
       if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
+      if (await changingPassword()) return page(req, res, ctx, 503, 'Đang đổi mật khẩu và khởi động lại OpenCode. Vui lòng chờ rồi đăng nhập lại.', next);
       state.revoke(cookies(req)[ctx.cookie]);
-      const value = state.createSession(token, ctx.origin);
+      const value = state.createSession(token, ctx.origin, revision);
+      if (!value) return page(req, res, ctx, 409, 'Phiên đã bị thu hồi trong lúc đăng nhập. Vui lòng thử lại.', next);
       state.succeed(ctx.ip);
       redirect(res, ctx, next, { 'set-cookie': [cookie(ctx, ctx.cookie, value, 28800), cookie(ctx, ctx.csrfCookie, '', 0, ctx.secure ? '/' : '/login')] });
     } finally { state.end(ctx.ip); }
@@ -235,6 +253,15 @@ export function createLoginServer(options = {}) {
     const url = new URL(req.url, ctx.origin);
     url.searchParams.delete('auth_token');
     return url.pathname + url.search;
+  }
+  function canonicalPath(pathname) {
+    let path = pathname;
+    for (let count = 0; count < 3; count++) {
+      const decoded = decodeURIComponent(path);
+      if (decoded === path) break;
+      path = decoded;
+    }
+    return new URL(path.replaceAll('\\', '/').replace(/\/{2,}/g, '/'), 'http://127.0.0.1').pathname.replace(/\/+$/, '');
   }
   function watchSession(req, ctx, target) {
     const timer = setInterval(() => {
@@ -324,7 +351,7 @@ export function createLoginServer(options = {}) {
     if (operation === 'status') {
       if (req.method !== 'GET') return send(405, { message: 'Phương thức không hợp lệ.' });
       if (!config.adminSocket) return send(200, { available: false, message: 'Chưa bật dịch vụ quản trị. Cài lại bằng bộ cài Linux để sử dụng.', csrf: adminCSRF(ctx, session) });
-      const result = await adminCall(config.adminSocket, 'status');
+      const result = await adminCall(config.adminSocket, 'status', {}, { signal: shutdown.signal });
       return send(result.status, { ...result, csrf: adminCSRF(ctx, session) });
     }
     const token = req.headers['x-web-login-csrf'];
@@ -350,7 +377,7 @@ export function createLoginServer(options = {}) {
       catch { return send(400, { message: 'Dữ liệu không hợp lệ.' }); }
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return send(400, { message: 'Dữ liệu không hợp lệ.' });
       const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
-      const result = await adminCall(config.adminSocket, operation, picked);
+      const result = await adminCall(config.adminSocket, operation, picked, { signal: shutdown.signal });
       console.log(JSON.stringify({ event: 'web_admin_request', operation, ip: ctx.ip, status: result.status, at: new Date().toISOString() }));
       if (result.status === 401) {
         const failed = state.fail(ctx.ip);
@@ -392,7 +419,12 @@ export function createLoginServer(options = {}) {
         res.end(JSON.stringify({ csrf, captcha, refreshed }));
         return;
       }
-      if (state.state(ctx.ip).blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.');
+      if (state.state(ctx.ip).blocked) {
+        if (!state.allowRequest(ctx.ip, 'blocked')) { res.setHeader('retry-after', '60'); return reject(res, ctx, 429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.'); }
+        const message = 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.';
+        if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/web-login/api/')) return reject(res, ctx, 403, message);
+        return page(req, res, ctx, 403, message);
+      }
       const session = state.session(cookies(req)[ctx.cookie], ctx.origin);
       if (url.pathname.startsWith('/web-login/')) return await administration(req, res, ctx, session, url);
       if (url.pathname === '/login' || url.pathname === '/login/captcha') {
@@ -421,7 +453,10 @@ export function createLoginServer(options = {}) {
         state.revoke(cookies(req)[ctx.cookie]);
         return redirect(res, ctx, '/login', { 'set-cookie': cookie(ctx, ctx.cookie, '', 0) });
       }
-      if (url.pathname.startsWith('/auth/') || url.pathname === '/api/pair') return reject(res, ctx, 403, 'Đăng nhập qua trang đăng nhập.');
+      let path;
+      try { path = canonicalPath(url.pathname); }
+      catch { return reject(res, ctx, 400, 'Đường dẫn không hợp lệ.'); }
+      if (path === '/auth' || path.startsWith('/auth/') || path === '/api/pair' || path.startsWith('/api/pair/')) return reject(res, ctx, 403, 'Đăng nhập qua trang đăng nhập.');
       const publicPath = url.pathname.startsWith('/_assets/') || url.pathname.startsWith('/icons/') || ['/site.webmanifest', '/sw.js', '/registerSW.js'].includes(url.pathname);
       if (publicPath && !['GET', 'HEAD'].includes(req.method)) return reject(res, ctx, 405, 'Phương thức không hợp lệ.');
       const apiPath = url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname === '/openapi.json';
@@ -442,42 +477,55 @@ export function createLoginServer(options = {}) {
     }
   });
 
+  function rejectUpgrade(socket, status = 403) {
+    if (socket.destroyed || socket.writableEnded) return;
+    const reason = { 403: 'Forbidden', 429: 'Too Many Requests', 502: 'Bad Gateway' }[status];
+    socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n${status === 429 ? 'Retry-After: 60\r\n' : ''}\r\n`, () => socket.destroy());
+  }
   server.on('upgrade', (req, socket, head) => {
     let ctx, session;
     try {
       ctx = context(req);
+      if (!state.allowRequest(ctx.ip, 'websocket', 60)) return rejectUpgrade(socket, 429);
       const url = new URL(req.url, ctx.origin);
       session = state.session(cookies(req)[ctx.cookie], ctx.origin);
-      if (req.method !== 'GET' || req.headers.upgrade?.toLowerCase() !== 'websocket' || req.headers['sec-websocket-version'] !== '13' || !/^[A-Za-z0-9+/]{22}==$/.test(req.headers['sec-websocket-key'] || '') || ctx.redirect || state.state(ctx.ip).blocked || !session || req.headers.origin !== ctx.origin || url.origin !== ctx.origin || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(url.pathname)) throw new Error('Unauthorized upgrade');
+      if (req.method !== 'GET' || req.headers.upgrade?.toLowerCase() !== 'websocket' || req.headers['sec-websocket-version'] !== '13' || !/^[A-Za-z0-9+/]{22}==$/.test(req.headers['sec-websocket-key'] || '') || ctx.redirect || state.state(ctx.ip).blocked || !session || req.headers.origin !== ctx.origin || url.origin !== ctx.origin || req.headers['transfer-encoding'] || req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0' || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(url.pathname) || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(canonicalPath(url.pathname))) throw new Error('Unauthorized upgrade');
     } catch {
-      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      rejectUpgrade(socket);
       return;
     }
-    const upstream = net.connect(backendPort, backendHost, () => {
-      const lines = [`${req.method} ${upstreamPath(req, ctx)} HTTP/${req.httpVersion}`];
-      for (const [key, value] of Object.entries(upstreamHeaders(req, ctx, session, true))) {
+    let upstream;
+    const request = http.request({ hostname: backendHost, port: backendPort, method: 'GET', path: upstreamPath(req, ctx),
+      headers: upstreamHeaders(req, ctx, session, true), maxHeaderSize: 16384, signal: shutdown.signal });
+    const handshakeTimer = setTimeout(() => request.destroy(new Error('WebSocket handshake timeout')), 15000);
+    handshakeTimer.unref();
+    request.once('upgrade', (response, target, upstreamHead) => {
+      clearTimeout(handshakeTimer);
+      upstream = target;
+      upstream.on('error', () => socket.destroy());
+      upstream.once('close', () => socket.destroy());
+      const expected = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+      if (socket.destroyed || response.statusCode !== 101 || response.headers.upgrade?.toLowerCase() !== 'websocket' || !String(response.headers.connection || '').toLowerCase().split(',').map(x => x.trim()).includes('upgrade') || response.headers['sec-websocket-accept'] !== expected) {
+        upstream.destroy(); rejectUpgrade(socket, 502); return;
+      }
+      const result = { ...endToEndHeaders(response.headers), ...responseHeaders(ctx), connection: 'Upgrade', upgrade: 'websocket' };
+      for (const key of ['set-cookie', 'www-authenticate', 'content-length']) delete result[key];
+      const lines = ['HTTP/1.1 101 Switching Protocols'];
+      for (const [key, value] of Object.entries(result)) {
         for (const entry of Array.isArray(value) ? value : [value]) if (entry !== undefined) lines.push(`${key}: ${entry}`);
       }
-      upstream.write(lines.join('\r\n') + '\r\n\r\n');
+      socket.write(lines.join('\r\n') + '\r\n\r\n');
+      if (upstreamHead.length) socket.write(upstreamHead);
       if (head.length) upstream.write(head);
+      upstream.setTimeout(0); socket.setTimeout(0);
+      watchSession(req, ctx, socket);
       socket.pipe(upstream).pipe(socket);
     });
-    const handshakeTimer = setTimeout(() => { upstream.destroy(); socket.destroy(); }, 15000);
-    handshakeTimer.unref();
-    let handshake = Buffer.alloc(0);
-    const checkHandshake = (chunk) => {
-      handshake = Buffer.concat([handshake, chunk]);
-      const end = handshake.indexOf('\r\n\r\n');
-      if (end > 16384 || (end < 0 && handshake.length > 16384)) { upstream.destroy(); socket.destroy(); }
-      if (end >= 0) { clearTimeout(handshakeTimer); upstream.off('data', checkHandshake); handshake = null; }
-    };
-    upstream.on('data', checkHandshake);
-    upstream.once('close', () => clearTimeout(handshakeTimer));
-    watchSession(req, ctx, socket);
-    upstream.on('error', () => socket.destroy());
-    socket.on('error', () => upstream.destroy());
-    socket.on('close', () => upstream.destroy());
-    upstream.on('close', () => socket.destroy());
+    request.once('response', response => { clearTimeout(handshakeTimer); response.destroy(); rejectUpgrade(socket, 502); });
+    request.once('error', () => { if (upstream) socket.destroy(); else rejectUpgrade(socket, 502); });
+    request.once('close', () => clearTimeout(handshakeTimer));
+    socket.once('close', () => { clearTimeout(handshakeTimer); request.destroy(); upstream?.destroy(); });
+    request.end();
   });
   server.headersTimeout = 15000;
   server.requestTimeout = 15000;

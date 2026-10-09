@@ -18,6 +18,15 @@ function atomic(file, value, mode = 0o600) {
   finally { rmSync(temporary, { force: true }); }
 }
 function json(file, fallback) { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : fallback; }
+function privateState(directory) {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const info = lstatSync(directory);
+  if (!info.isDirectory() || info.uid !== process.getuid() || info.mode & 0o077) throw new Error('Unsafe administrative state directory; private permissions 0700 are required');
+  for (const name of ['preferences.json', 'job.json']) {
+    const file = lstatSync(join(directory, name), { throwIfNoEntry: false });
+    if (file && (!file.isFile() || file.uid !== process.getuid() || file.mode & 0o077)) throw new Error('Unsafe administrative state file; private permissions 0600 are required');
+  }
+}
 const paths = config => ({
   state: `/var/lib/${config.name}-admin`,
   password: `/etc/${config.name}-backend-password.env`,
@@ -63,14 +72,48 @@ export function privateBackup(config, files) {
   };
 }
 
-export async function rotatePassword(config, password, { run = command, probe = readResponse, backup = privateBackup } = {}) {
+function writeBackendPassword(config, password) {
+  const target = paths(config);
+  atomic(target.password, `OPENCODE_PASSWORD=${JSON.stringify(password)}\nOPENCODE_SERVER_PASSWORD=${JSON.stringify(password)}\n`);
+  atomic(target.dropin, `[Service]\nEnvironment=OPENCODE_PASSWORD=\nEnvironment=OPENCODE_SERVER_PASSWORD=\nEnvironmentFile=${target.password}\n`, 0o644);
+}
+
+export function protectBackendPassword(config, { run = command, backup = privateBackup } = {}) {
+  if (process.getuid?.() !== 0) throw new Error('Protecting backend configuration requires root');
+  const password = runningPassword(config, run);
+  if (/[\x00-\x1f\x7f]/.test(password)) throw new Error('Backend password cannot be represented safely in EnvironmentFile');
+  const fragment = run('systemctl', ['show', config.backendService, '-p', 'FragmentPath', '--value']);
+  const dropins = run('systemctl', ['show', config.backendService, '-p', 'DropInPaths', '--value']);
+  const unitFiles = [fragment, ...dropins.split(/\s+/).filter(Boolean)];
+  const secretFiles = unitFiles.filter(file => {
+    if (!isAbsolute(file)) throw new Error('Invalid backend unit path');
+    const info = lstatSync(file);
+    if (!info.isFile() || info.uid !== 0 || info.mode & 0o022) throw new Error('Unsafe backend unit file');
+    return /OPENCODE_(?:SERVER_)?PASSWORD\s*=/.test(readFileSync(file, 'utf8'));
+  });
+  const target = paths(config);
+  mkdirSync(dirname(target.dropin), { recursive: true, mode: 0o755 });
+  const restore = backup(config, [...new Set([target.password, target.dropin, ...secretFiles])]);
+  try {
+    writeBackendPassword(config, password);
+    for (const file of secretFiles) chmodSync(file, 0o600);
+    run('systemctl', ['daemon-reload']);
+    const visible = run('systemctl', ['show', config.backendService, '-p', 'Environment', '--value']);
+    const nonempty = visible.replace(/(?:^|\s)(?:"OPENCODE_(?:SERVER_)?PASSWORD="|OPENCODE_(?:SERVER_)?PASSWORD=)(?=\s|$)/g, '');
+    if (/OPENCODE_(?:SERVER_)?PASSWORD=/.test(nonempty)) throw new Error('A later drop-in exposes the password');
+    return restore;
+  } catch {
+    restore(); run('systemctl', ['daemon-reload']);
+    throw new Error('Could not protect backend password; previous configuration restored');
+  }
+}
+
+export async function rotatePassword(config, password, { run = command, probe = readResponse, backup = privateBackup, revoke } = {}) {
   const target = paths(config);
   mkdirSync(dirname(target.dropin), { recursive: true, mode: 0o755 });
   const restore = backup(config, [target.password, target.dropin]);
   try {
-    // EnvironmentFile values override Environment values; both native variable names are set.
-    atomic(target.password, `OPENCODE_PASSWORD=${JSON.stringify(password)}\nOPENCODE_SERVER_PASSWORD=${JSON.stringify(password)}\n`);
-    atomic(target.dropin, `[Service]\nEnvironmentFile=${target.password}\n`, 0o644);
+    writeBackendPassword(config, password);
     run('systemctl', ['daemon-reload']);
     run('systemctl', ['restart', config.backendService]);
     let ready = false;
@@ -82,6 +125,12 @@ export async function rotatePassword(config, password, { run = command, probe = 
       await pause(1000);
     }
     if (!ready) throw new Error('Backend did not accept new password');
+    if (revoke) await revoke();
+    else {
+      const owner = run('systemctl', ['show', `${config.name}.service`, '-p', 'User', '--value']) || 'root';
+      if (!/^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(owner) || !config.gateway.statePath || !config.node || !config.installDirectory) throw new Error('Invalid session revocation configuration');
+      run('runuser', ['-u', owner, '--', '/usr/bin/env', `LOGIN_STATE_DB=${config.gateway.statePath}`, config.node, join(config.installDirectory, 'manage.mjs'), 'revoke-sessions']);
+    }
     run('systemctl', ['restart', `${config.name}.service`]);
   } catch {
     restore();
@@ -94,7 +143,7 @@ export async function rotatePassword(config, password, { run = command, probe = 
 
 export function createAdminController(config, dependencies = {}) {
   const stateDir = dependencies.stateDir || paths(config).state;
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  privateState(stateDir);
   const preferencesPath = join(stateDir, 'preferences.json');
   const jobPath = join(stateDir, 'job.json');
   const currentVersion = () => JSON.parse(readFileSync(join(config.installDirectory, 'package.json'), 'utf8')).version;
@@ -114,21 +163,23 @@ export function createAdminController(config, dependencies = {}) {
   const rotate = dependencies.rotate || (password => rotatePassword(config, password));
   // The installer needs the host's existing OpenCode path, including installations under /tmp.
   const launch = dependencies.launch || (() => command('systemd-run', ['--quiet', `--unit=${config.name}-update`, '--collect', '--property=Type=exec', '--property=UMask=0077', '--property=NoNewPrivileges=yes', '--property=PrivateTmp=no', '--property=RuntimeMaxSec=600', '--property=TimeoutStopSec=15', '--property=StandardOutput=null', '--property=StandardError=null', config.node, join(config.installDirectory, 'admin-service.mjs'), 'apply', config.configPath]));
-  let cachedRelease = null, checked = 0, checkError = '', checking;
+  let cachedRelease = null, checked = 0, checkError = '', checking, preferenceRevision = 0;
   let attempts = 0, until = 0;
+  const matchesPassword = password => typeof password === 'string' && password.length <= 2048 && equal(password, getPassword());
   const authenticate = password => {
     if (Date.now() >= until) { until = Date.now() + 60000; attempts = 0; }
     if (++attempts > 10) return { status: 429, message: 'Quá nhiều lần xác nhận mật khẩu. Vui lòng thử lại sau một phút.' };
-    if (typeof password !== 'string' || password.length > 2048 || !equal(password, getPassword())) return { status: 401, message: 'Mật khẩu hiện tại không đúng.' };
+    if (!matchesPassword(password)) return { status: 401, message: 'Mật khẩu hiện tại không đúng.' };
   };
   async function check(force = false) {
     if (checking) return checking;
     if (checked && Date.now() - checked < (force ? 60000 : 300000)) return;
     checking = (async () => {
       const channel = preferences().channel;
-      try { cachedRelease = await getRelease(currentVersion(), channel); checkError = ''; }
+      const version = currentVersion(), revision = preferenceRevision;
+      try { cachedRelease = await getRelease(version, channel); checkError = ''; }
       catch { cachedRelease = null; checkError = 'Chưa kiểm tra được GitHub. Vui lòng thử lại sau.'; }
-      if (channel !== preferences().channel) { checked = 0; cachedRelease = null; }
+      if (revision !== preferenceRevision || channel !== preferences().channel || version !== currentVersion()) { checked = 0; cachedRelease = null; checkError = ''; }
       else checked = Date.now();
     })();
     try { await checking; } finally { checking = null; }
@@ -159,10 +210,15 @@ export function createAdminController(config, dependencies = {}) {
         if (typeof fields.automatic !== 'boolean' || !['stable', 'beta'].includes(fields.channel)) return { status: 422, message: 'Cấu hình cập nhật không hợp lệ.' };
         if (!dependencies.stateDir) privateBackup(config, [preferencesPath]);
         atomic(preferencesPath, JSON.stringify({ automatic: fields.automatic, channel: fields.channel }) + '\n');
+        preferenceRevision++;
         checked = 0; cachedRelease = null;
         return { ...status(), message: 'Đã lưu cấu hình cập nhật.' };
       }
-      if (operation === 'update') { await check(); return startUpdate(); }
+      if (operation === 'update') {
+        await check();
+        if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+        return startUpdate();
+      }
       if (!validPassword(fields.newPassword) || fields.newPassword !== fields.confirmPassword || equal(fields.newPassword, fields.password)) return { status: 422, message: 'Mật khẩu mới cần khác mật khẩu cũ, từ 16 đến 128 ký tự và khớp với ô xác nhận.' };
       setJob({ type: 'password', phase: 'running', started: Date.now(), message: 'Đang đổi mật khẩu và khởi động lại OpenCode.' });
       setTimeout(async () => {
@@ -174,7 +230,7 @@ export function createAdminController(config, dependencies = {}) {
     async automatic() {
       if (!preferences().automatic || busy()) return;
       await check();
-      if (cachedRelease && !busy()) await startUpdate();
+      if (preferences().automatic && cachedRelease && !busy()) await startUpdate();
     },
   };
 }
@@ -195,7 +251,7 @@ export async function serveAdmin(config) {
   if (oldJob?.type === 'password' && oldJob.phase === 'running') atomic(join(paths(config).state, 'job.json'), JSON.stringify({ type: 'password', phase: 'failed', message: 'Tác vụ đổi mật khẩu bị gián đoạn. Kiểm tra dịch vụ và đăng nhập lại.', updated: Date.now() }));
   const directory = dirname(config.socket);
   const info = lstatSync(directory);
-  if (!info.isDirectory() || info.uid !== 0 || info.mode & 0o007) throw new Error('Unsafe admin socket directory');
+  if (!info.isDirectory() || info.uid !== 0 || info.mode & 0o027) throw new Error('Unsafe admin socket directory');
   rmSync(config.socket, { force: true });
   const server = http.createServer({ connectionsCheckingInterval: 1000 }, async (req, res) => {
     const send = result => { res.writeHead(result.status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(result)); };
@@ -225,7 +281,9 @@ export async function serveAdmin(config) {
 }
 
 export async function applyUpdate(config, dependencies = {}) {
-  const jobPath = join(dependencies.stateDir || paths(config).state, 'job.json');
+  const stateDir = dependencies.stateDir || paths(config).state;
+  privateState(stateDir);
+  const jobPath = join(stateDir, 'job.json');
   const job = json(jobPath, null);
   let staging;
   const finish = (phase, message) => atomic(jobPath, JSON.stringify({ ...job, phase, message, release: undefined, updated: Date.now() }) + '\n');

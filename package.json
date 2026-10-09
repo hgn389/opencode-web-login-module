@@ -1,6 +1,6 @@
 {
   "name": "opencode-web-login",
-  "version": "1.1.0-beta",
+  "version": "1.1.1-beta",
   "description": "Reusable login and security gateway for OpenCode v2",
   "private": true,
   "license": "UNLICENSED",

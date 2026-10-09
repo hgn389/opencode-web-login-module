@@ -14,10 +14,11 @@ test('failed installation restores files, dependencies and service state', { ski
   const environment = `/etc/${name}.env`;
   const service = `/etc/systemd/system/${name}.service`;
   const backend = `${name}-backend.service`;
+  const backendUnit = `/etc/systemd/system/${backend}`;
   const dropinDirectory = `/etc/systemd/system/${backend}.d`;
   const dropin = join(dropinDirectory, 'web-login.conf');
   const backup = `/var/lib/${name}-install-backup`;
-  for (const path of [directory, environment, service, dropinDirectory, backup]) assert.equal(existsSync(path), false, `Refuse to touch an existing fixture: ${path}`);
+  for (const path of [directory, environment, service, backendUnit, dropinDirectory, backup]) assert.equal(existsSync(path), false, `Refuse to touch an existing fixture: ${path}`);
   const reserve = net.createServer();
   reserve.listen(0, '127.0.0.1');
   await once(reserve, 'listening');
@@ -33,7 +34,7 @@ test('failed installation restores files, dependencies and service state', { ski
     const name=basename(process.argv[1]); const args=process.argv.slice(2);
     appendFileSync(${JSON.stringify(log)},JSON.stringify({name,args})+'\\n');
     if(name==='systemctl') {
-      if(args[0]==='show') console.log(args.includes('LoadState')?'loaded':args.includes('ActiveState')?'active':'0');
+      if(args[0]==='show') console.log(args.includes('LoadState')?'loaded':args.includes('ActiveState')?'active':args.includes('MainPID')?process.ppid:args.includes('FragmentPath')?${JSON.stringify(backendUnit)}:args.includes('DropInPaths')?'':args.includes('Environment')?'OPENCODE_PASSWORD= OPENCODE_SERVER_PASSWORD=':'0');
       else if(args[0]==='is-enabled') console.log('enabled');
       else if(args[0]==='restart' && args[1]===${JSON.stringify(backend)} && !existsSync(${JSON.stringify(failure)})) {writeFileSync(${JSON.stringify(failure)},'failed');process.exitCode=1;}
     } else if(name==='getent') {
@@ -42,11 +43,12 @@ test('failed installation restores files, dependencies and service state', { ski
   `;
   try {
     mkdirSync(tools);
+    writeFileSync(backendUnit, '[Service]\nEnvironment=OPENCODE_PASSWORD=isolated-installer-fixture\n', { mode: 0o644 });
     for (const binary of ['systemctl', 'systemd-analyze', 'getent', 'npm', 'chown']) writeFileSync(join(tools, binary), script, { mode: 0o755 });
     for (const [path, text] of originals) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text, { mode: path === environment ? 0o640 : 0o644 }); }
     mkdirSync(join(directory, 'node_modules'));
     writeFileSync(join(directory, 'node_modules', 'fixture'), 'previous-dependencies');
-    const child = spawn(process.execPath, [new URL('../bin/opencode-web-login.mjs', import.meta.url).pathname, 'install', '--name', name, '--install-dir', directory, '--opencode-service', backend, '--opencode-bin', '/usr/bin/true', '--port', String(port), '--backend-port', String(port === 65535 ? 65534 : port + 1)], { env: { ...process.env, PATH: `${tools}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [new URL('../bin/opencode-web-login.mjs', import.meta.url).pathname, 'install', '--name', name, '--install-dir', directory, '--opencode-service', backend, '--opencode-bin', '/usr/bin/true', '--port', String(port), '--backend-port', String(port === 65535 ? 65534 : port + 1)], { env: { ...process.env, OPENCODE_PASSWORD: 'isolated-installer-fixture', PATH: `${tools}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stdout.resume(); child.stderr.on('data', (chunk) => { stderr += chunk; });
     const [code] = await once(child, 'exit');
@@ -55,6 +57,9 @@ test('failed installation restores files, dependencies and service state', { ski
     assert(stderr.includes(backup));
     for (const [path, text] of originals) assert.equal(readFileSync(path, 'utf8'), text);
     assert.equal(statSync(environment).mode & 0o777, 0o640);
+    assert.equal(statSync(backendUnit).mode & 0o777, 0o644);
+    assert.equal(existsSync(`/etc/${name}-backend-password.env`), false);
+    assert.equal(existsSync(join(dropinDirectory, '90-web-login-password.conf')), false);
     assert.equal(existsSync(join(directory, 'index.mjs')), false, 'Files absent before installation must be removed during restoration');
     assert.equal(readFileSync(join(directory, 'node_modules', 'fixture'), 'utf8'), 'previous-dependencies');
     assert(existsSync(join(backup, '.git')));
@@ -64,6 +69,6 @@ test('failed installation restores files, dependencies and service state', { ski
     assert.equal(commands.some((entry) => entry.name === 'systemctl' && entry.args[0] === 'disable'), false, 'Previously enabled services must remain enabled');
   } finally {
     for (const path of [directory, dropinDirectory, backup, dir]) rmSync(path, { recursive: true, force: true });
-    for (const path of [environment, service]) rmSync(path, { force: true });
+    for (const path of [environment, service, backendUnit, `/etc/${name}-backend-password.env`]) rmSync(path, { force: true });
   }
 });

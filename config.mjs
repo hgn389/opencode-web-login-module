@@ -1,6 +1,23 @@
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve, dirname } from 'node:path';
+import { lstatSync } from 'node:fs';
 import { isIP } from 'node:net';
+
+export function validateStateFiles(path, { requireDatabase = false } = {}) {
+  const parent = lstatSync(dirname(path));
+  if (!parent.isDirectory() || parent.uid !== process.getuid() || parent.mode & 0o077) throw new Error('The security database directory must be owned by the current user with permissions 0700');
+  for (let directory = dirname(dirname(path)); ; directory = dirname(directory)) {
+    const info = lstatSync(directory);
+    const safeTemporaryDirectory = info.uid === 0 && (info.mode & 0o1000) !== 0;
+    if (!info.isDirectory() || ![0, process.getuid()].includes(info.uid) || info.mode & 0o022 && !safeTemporaryDirectory) throw new Error('Unsafe security database ancestor directory');
+    if (directory === dirname(directory)) break;
+  }
+  for (const file of [path, path + '-wal', path + '-shm']) {
+    const info = lstatSync(file, { throwIfNoEntry: false });
+    if (!info) { if (file === path && requireDatabase) throw new Error('Security database does not exist'); continue; }
+    if (!info.isFile() || info.uid !== process.getuid() || info.mode & 0o077) throw new Error('Security database files must be regular files owned by the current user with permissions 0600');
+  }
+}
 
 export function defaultStatePath() {
   return join(homedir(), '.local', 'state', 'opencode-web-login', 'security.sqlite');

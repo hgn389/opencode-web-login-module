@@ -1,29 +1,13 @@
-import http from 'node:http';
+import { readResponse } from './http-client.mjs';
 
-export function adminCall(socketPath, operation, fields = {}) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ operation, ...fields });
-    const request = http.request({ socketPath, path: '/', method: 'POST', headers: {
-      'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
-    } }, (response) => {
-      let size = 0;
-      const chunks = [];
-      response.on('data', chunk => {
-        size += chunk.length;
-        if (size > 65536) response.destroy(new Error('Admin response too large'));
-        else chunks.push(chunk);
-      });
-      response.once('error', reject);
-      response.once('aborted', () => reject(new Error('Admin response interrupted')));
-      response.once('end', () => {
-        try { resolve({ status: response.statusCode, ...JSON.parse(Buffer.concat(chunks).toString()) }); }
-        catch { reject(new Error('Invalid admin response')); }
-      });
-    });
-    const timer = setTimeout(() => request.destroy(new Error('Admin timeout')), 20000);
-    timer.unref();
-    request.once('close', () => clearTimeout(timer));
-    request.once('error', reject);
-    request.end(body);
-  });
+export async function adminCall(socketPath, operation, fields = {}, { signal, timeout = 20000 } = {}) {
+  const body = JSON.stringify({ ...fields, operation });
+  const response = await readResponse({ socketPath, path: '/', method: 'POST', headers: {
+    'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
+  } }, { signal, timeout, body });
+  let data;
+  try { data = JSON.parse(response.body); }
+  catch { throw new Error('Invalid admin response'); }
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.status !== undefined && data.status !== response.status) throw new Error('Invalid admin response');
+  return { ...data, status: response.status };
 }

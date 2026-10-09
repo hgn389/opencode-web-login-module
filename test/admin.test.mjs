@@ -136,7 +136,9 @@ test('password rotation restores previous files and services when restart fails'
     assert.equal(calls.filter(x => x[0] === 'restart' && x[1] === backendService).length, 2);
     assert(calls.some(x => x[0] === 'restart' && x[1] === `${name}.service`));
     assert(existsSync(join(backup, '.git')));
-    await rotatePassword(config, nextPassword, { run: () => {}, probe: async () => ({ status: 200, headers: { 'content-type': 'application/json' } }) });
+    let revoked = false;
+    await rotatePassword(config, nextPassword, { run: () => {}, revoke: () => { revoked = true; }, probe: async () => ({ status: 200, headers: { 'content-type': 'application/json' } }) });
+    assert(revoked, 'Session invalidation must also happen in the privileged rotation task');
     assert(readFileSync(passwordFile, 'utf8').includes('OPENCODE_SERVER_PASSWORD='));
   } finally {
     rmSync(passwordFile, { force: true }); rmSync(dirname(dropin), { recursive: true, force: true }); rmSync(backup, { recursive: true, force: true });
@@ -146,12 +148,12 @@ test('password rotation restores previous files and services when restart fails'
 test('update worker verifies package before installer, preserves fixed options and records failures', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'login-update-worker-'));
   const code = join(dir, 'code'); mkdirSync(code);
-  const stateDir = join(dir, 'state'); mkdirSync(stateDir);
+  const stateDir = join(dir, 'state'); mkdirSync(stateDir, { mode: 0o700 });
   writeFileSync(join(code, 'package.json'), JSON.stringify({ version: '1.0.0-beta' }));
   const fixture = archiveFixture();
   const release = { ...fixture.expected, version: '1.0.1', assetURL: 'https://github.com/fixture' };
   const jobPath = join(stateDir, 'job.json');
-  const prepare = () => writeFileSync(jobPath, JSON.stringify({ type: 'update', phase: 'starting', started: Date.now(), version: release.version, release }));
+  const prepare = () => writeFileSync(jobPath, JSON.stringify({ type: 'update', phase: 'starting', started: Date.now(), version: release.version, release }), { mode: 0o600 });
   const config = { name: 'oc-fixture', installDirectory: code, node: process.execPath, backendService: 'oc-backend.service', opencode: '/usr/bin/true', gateway: { host: '127.0.0.1', port: 4096, backendPort: 4097, publicOrigins: [], trustedProxies: ['127.0.0.1'] } };
   let executions = 0;
   try {

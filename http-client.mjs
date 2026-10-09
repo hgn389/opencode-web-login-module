@@ -1,7 +1,7 @@
 import http from 'node:http';
 
 // Bound the complete exchange, including responses that arrive one byte at a time.
-export function readResponse(options, { timeout = 10000, limit = 65536, signal } = {}) {
+export function readResponse(options, { timeout = 10000, limit = 65536, signal, body } = {}) {
   return new Promise((resolve, reject) => {
     let timer;
     const request = http.request({ ...options, signal }, (response) => {
@@ -21,7 +21,7 @@ export function readResponse(options, { timeout = 10000, limit = 65536, signal }
     timer.unref();
     request.once('error', reject);
     request.once('close', () => clearTimeout(timer));
-    request.end();
+    request.end(body);
   });
 }
 

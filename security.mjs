@@ -1,9 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, chmodSync, lstatSync } from 'node:fs';
+import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
+import { validateStateFiles } from './config.mjs';
 
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 const IDLE_TTL = 30 * 60 * 1000;
@@ -19,13 +20,7 @@ export class SecurityStore {
       fontLoaded = true;
     }
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    const parent = lstatSync(dirname(path));
-    if (!parent.isDirectory() || parent.uid !== process.getuid() || (parent.mode & 0o077)) throw new Error('The security database directory must be owned by the current user with permissions 0700');
-    for (const file of [path, path + '-wal', path + '-shm']) {
-      const info = lstatSync(file, { throwIfNoEntry: false });
-      if (!info) continue;
-      if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077)) throw new Error('Security database files must be regular files owned by the current user with permissions 0600');
-    }
+    validateStateFiles(path);
     this.db = new DatabaseSync(path, { allowExtension: false });
     chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;
@@ -38,6 +33,7 @@ export class SecurityStore {
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
       CREATE TABLE IF NOT EXISTS security_keys (name TEXT PRIMARY KEY, value BLOB NOT NULL CHECK(length(value) = 32));`);
     this.db.prepare('INSERT OR IGNORE INTO security_keys(name, value) VALUES (?, ?)').run('csrf', randomBytes(32));
+    this.db.prepare('INSERT OR IGNORE INTO security_keys(name, value) VALUES (?, ?)').run('session_generation', randomBytes(32));
     this.csrfKey = Buffer.from(this.db.prepare('SELECT value FROM security_keys WHERE name = ?').get('csrf').value);
     this.challenges = new Map();
     this.requests = new Map();
@@ -131,17 +127,23 @@ export class SecurityStore {
 
   verifyChallenge(csrf, ip, answer) {
     const challenge = this.challenges.get(csrf);
+    if (!challenge || challenge.ip !== ip) return false;
     this.challenges.delete(csrf);
-    if (!challenge || challenge.ip !== ip || challenge.expires <= Date.now() || !/^[A-Z2-9]{6}$/.test(answer)) return false;
+    if (challenge.expires <= Date.now() || !/^[A-Z2-9]{6}$/.test(answer)) return false;
     return timingSafeEqual(challenge.digest, this.answerHash(csrf, ip, answer));
   }
 
-  createSession(token, origin) {
+  sessionRevision() {
+    return Buffer.from(this.db.prepare('SELECT value FROM security_keys WHERE name = ?').get('session_generation').value);
+  }
+
+  createSession(token, origin, revision = this.sessionRevision()) {
     const value = randomBytes(32).toString('base64url');
     const now = Date.now();
-    this.db.prepare('INSERT INTO sessions(id, token, origin, created, last_seen, expires) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(hash(value), token, origin, now, now, now + SESSION_TTL);
-    return value;
+    const result = this.db.prepare(`INSERT INTO sessions(id, token, origin, created, last_seen, expires)
+      SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM security_keys WHERE name = 'session_generation' AND value = ?)`)
+      .run(hash(value), token, origin, now, now, now + SESSION_TTL, revision);
+    return result.changes ? value : undefined;
   }
 
   session(value, origin, touch = true) {
@@ -161,7 +163,14 @@ export class SecurityStore {
     if (value) this.db.prepare('DELETE FROM sessions WHERE id = ?').run(hash(value));
   }
 
-  revokeAll() { this.db.prepare('DELETE FROM sessions').run(); }
+  revokeAll() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('INSERT OR REPLACE INTO security_keys(name, value) VALUES (?, ?)').run('session_generation', randomBytes(32));
+      this.db.prepare('DELETE FROM sessions').run();
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
 
   prune() {
     const now = Date.now();

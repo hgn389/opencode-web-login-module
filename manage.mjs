@@ -1,14 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
-import { lstatSync } from 'node:fs';
 import { isIP } from 'node:net';
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { defaultStatePath } from './config.mjs';
+import { defaultStatePath, validateStateFiles } from './config.mjs';
 
 export function manage(command, input, path = defaultStatePath()) {
-  const info = lstatSync(path);
-  if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077)) {
-    throw new Error('Run this command as the database owner');
-  }
+  validateStateFiles(path, { requireDatabase: true });
   const db = new DatabaseSync(path, { allowExtension: false });
   db.exec('PRAGMA busy_timeout=3000');
   try {
@@ -20,7 +17,13 @@ export function manage(command, input, path = defaultStatePath()) {
       const result = db.prepare('DELETE FROM login_ips WHERE ip = ?').run(ip);
       console.log(JSON.stringify({ event: 'ip_unblocked', ip, changed: result.changes, at: new Date().toISOString() }));
     } else if (command === 'revoke-sessions') {
-      const result = db.prepare('DELETE FROM sessions').run();
+      db.exec('BEGIN IMMEDIATE');
+      let result;
+      try {
+        db.prepare('INSERT OR REPLACE INTO security_keys(name, value) VALUES (?, ?)').run('session_generation', randomBytes(32));
+        result = db.prepare('DELETE FROM sessions').run();
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
       console.log(JSON.stringify({ event: 'sessions_revoked', count: result.changes, at: new Date().toISOString() }));
     } else {
       throw new Error('Usage: node manage.mjs blocked | unblock IP | revoke-sessions');
