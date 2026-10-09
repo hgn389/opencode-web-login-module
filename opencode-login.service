@@ -1,6 +1,7 @@
 [Unit]
 Description=OpenCode Web Login
 Requires=opencode.service
+PartOf=opencode.service
 After=network.target opencode.service
 
 [Service]
