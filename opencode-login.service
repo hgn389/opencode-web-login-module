@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenCode Web Login
+Requires=opencode.service
+After=network.target opencode.service
+
+[Service]
+Type=simple
+User=mmosh6517
+WorkingDirectory=/opt/opencode-login
+ExecStart=/usr/local/bin/node /opt/opencode-login/server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
