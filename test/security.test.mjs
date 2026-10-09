@@ -200,6 +200,15 @@ async function stop(child) {
     assert.equal((await request(port, '/api/info', { ...user, cookie: rotatedCookie })).status, 401);
     assert.equal(calls, callsAtRevocation);
     console.log('Verified CSRF protection, server-side logout, idle expiry and revocation after backend password rotation');
+    const plainDomain = await request(port, '/login', { ip: '198.51.100.60', extra: { host: 'login.security.test' } });
+    assert.equal(plainDomain.status, 308);
+    assert.equal(plainDomain.headers.location, 'https://login.security.test/login');
+    assert.equal((await request(port, '/login', { method: 'POST', data: '', ip: '198.51.100.60', extra: { host: 'login.security.test' } })).status, 400);
+    let limited;
+    for (let i = 0; i < 41; i++) limited = await request(port, '/login', { ip: '198.51.100.70' });
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers['retry-after'], '60');
+    console.log('Verified HTTP-to-HTTPS redirect, refusal of plaintext domain submissions, and request throttling');
   } finally {
     await stop(child);
     db.close();
