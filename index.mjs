@@ -23,9 +23,10 @@ export function createLoginServer(options = {}) {
     else trustedProxies.addAddress(ip, family);
   }
   const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
+  const loginScript = readFileSync(new URL('./login-client.js', import.meta.url), 'utf8');
   const state = new SecurityStore(config.statePath);
   const shutdown = new AbortController();
-  const csrfKey = randomBytes(32);
+  const csrfKey = state.csrfKey;
   const headers = {
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
@@ -79,10 +80,15 @@ export function createLoginServer(options = {}) {
   }
   function escapeHtml(value) { return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
   function cookies(req) {
-    return Object.fromEntries((req.headers.cookie || '').split(';').map((part) => {
+    const values = Object.create(null);
+    for (const part of (req.headers.cookie || '').split(';')) {
       const at = part.indexOf('=');
-      return at < 0 ? ['', ''] : [part.slice(0, at).trim(), part.slice(at + 1).trim()];
-    }));
+      if (at > 0) {
+        const name = part.slice(0, at).trim();
+        if (!Object.hasOwn(values, name)) values[name] = part.slice(at + 1).trim();
+      }
+    }
+    return values;
   }
   function cookie(ctx, name, value, age, path = '/') {
     return `${name}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${age}${ctx.secure ? '; Secure' : ''}`;
@@ -103,22 +109,33 @@ export function createLoginServer(options = {}) {
     const age = Date.now() - Number(parts[0]);
     return age >= 0 && age <= 600000 && timingSafeEqual(Buffer.from(parts[2]), Buffer.from(csrfSignature(parts.slice(0, 2).join('.'), ctx)));
   }
+  function formCSRF(req, ctx) {
+    const previous = cookies(req)[ctx.csrfCookie];
+    const remaining = Number(previous?.split('.')[0]) + 600000 - Date.now();
+    return validCSRF(previous, previous, ctx) && remaining > 15000 ? previous : newCSRF(ctx);
+  }
+  function csrfCookies(ctx, token) {
+    const age = Math.max(0, Math.ceil((Number(token.split('.')[0]) + 600000 - Date.now()) / 1000));
+    return [cookie(ctx, ctx.csrfCookie, token, age, ctx.secure ? '/' : '/login'),
+      ...(!ctx.secure ? [cookie(ctx, ctx.csrfCookie, '', 0)] : [])];
+  }
   function page(req, res, ctx, status = 200, message = '', next = '/') {
     const locked = state.state(ctx.ip).blocked;
-    const csrf = newCSRF(ctx);
+    const csrf = formCSRF(req, ctx);
     let captcha = '';
     if (!locked && state.state(ctx.ip).failures >= 5) {
-      state.challenge(csrf, ctx.ip);
-      captcha = '<div class="captcha"><label for="captcha">Mã xác minh</label><img src="/login/captcha" width="270" height="86" alt="Mã xác minh gồm 6 ký tự trong ảnh"><input id="captcha" name="captcha" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" required aria-describedby="captcha-help"><small id="captcha-help">Nhập 6 ký tự trong ảnh. <a href="/login?next=' + encodeURIComponent(safeNext(next, ctx)) + '">Đổi mã</a></small></div>';
+      const refresh = new URL(req.url, ctx.origin).searchParams.get('refresh') === '1';
+      if (refresh || !state.image(csrf, ctx.ip)) state.challenge(csrf, ctx.ip);
+      captcha = '<div class="captcha"><label for="captcha">Mã xác minh</label><img src="/login/captcha" width="270" height="86" alt="Mã xác minh gồm 6 ký tự trong ảnh"><input id="captcha" name="captcha" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" required aria-describedby="captcha-help"><small id="captcha-help">Nhập 6 ký tự trong ảnh. <a href="/login?refresh=1&amp;next=' + encodeURIComponent(safeNext(next, ctx)) + '">Đổi mã</a></small></div>';
     }
     const body = template.replace('{{MESSAGE}}', escapeHtml(message)).replace('{{CSRF}}', csrf)
       .replace('{{NEXT}}', escapeHtml(safeNext(next, ctx))).replace('{{CAPTCHA}}', captcha)
       .replace('{{FORM_STATE}}', locked ? 'disabled' : '');
     res.writeHead(status, {
       ...responseHeaders(ctx),
-      'content-security-policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+      'content-security-policy': "default-src 'none'; img-src 'self'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       'content-type': 'text/html; charset=utf-8',
-      'set-cookie': cookie(ctx, ctx.csrfCookie, csrf, 600, ctx.secure ? '/' : '/login'),
+      'set-cookie': csrfCookies(ctx, csrf),
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   }
@@ -150,7 +167,14 @@ export function createLoginServer(options = {}) {
     const fields = new URLSearchParams(Buffer.concat(chunks).toString());
     const next = safeNext(fields.get('next'), ctx);
     const csrf = fields.get('csrf') || '';
-    if (!validCSRF(csrf, cookies(req)[ctx.csrfCookie], ctx)) return page(req, res, ctx, 403, 'Phiên đăng nhập đã hết hạn. Vui lòng thử lại.', next);
+    const expectedCSRF = cookies(req)[ctx.csrfCookie];
+    if (!validCSRF(csrf, expectedCSRF, ctx)) {
+      const reason = !expectedCSRF ? 'cookie_missing' : csrf !== expectedCSRF ? 'token_mismatch' : 'expired_or_invalid';
+      console.log(JSON.stringify({ event: 'login_csrf_rejected', ip: ctx.ip, reason, at: new Date().toISOString() }));
+      return page(req, res, ctx, 403, !expectedCSRF
+        ? 'Trình duyệt chưa gửi cookie đăng nhập. Vui lòng cho phép cookie cho trang này rồi thử lại.'
+        : 'Trang đăng nhập đã hết hạn. Vui lòng thử lại với phiên mới.', next);
+    }
     if (!state.begin(ctx.ip)) return page(req, res, ctx, 429, 'Yêu cầu trước đang được xử lý. Vui lòng thử lại.', next);
     try {
       const account = state.state(ctx.ip);
@@ -260,6 +284,23 @@ export function createLoginServer(options = {}) {
     try {
       const url = new URL(req.url, ctx.origin);
       if (url.origin !== ctx.origin) return reject(res, ctx, 400, 'Yêu cầu không hợp lệ.');
+      if (url.pathname === '/login/client.js' && ['GET', 'HEAD'].includes(req.method)) {
+        res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'text/javascript; charset=utf-8' });
+        res.end(req.method === 'HEAD' ? undefined : loginScript);
+        return;
+      }
+      if (url.pathname === '/login/session') {
+        if (!state.allowRequest(ctx.ip)) return reject(res, ctx, 429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.');
+        if (req.method !== 'GET' || req.headers['x-opencode-login'] !== '1' || (req.headers.origin && req.headers.origin !== ctx.origin) || req.headers['sec-fetch-site'] === 'cross-site') return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
+        if (state.state(ctx.ip).blocked) return reject(res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.');
+        const csrf = formCSRF(req, ctx);
+        const captcha = state.state(ctx.ip).failures >= 5;
+        const refreshed = captcha && !state.image(csrf, ctx.ip);
+        if (refreshed) state.challenge(csrf, ctx.ip);
+        res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'application/json; charset=utf-8', 'set-cookie': csrfCookies(ctx, csrf) });
+        res.end(JSON.stringify({ csrf, captcha, refreshed }));
+        return;
+      }
       if (state.state(ctx.ip).blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.');
       const session = state.session(cookies(req)[ctx.cookie], ctx.origin);
       if (url.pathname === '/login' || url.pathname === '/login/captcha') {

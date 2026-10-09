@@ -9,7 +9,7 @@ import { normalizeConfig } from './config.mjs';
 import { readResponse, protectedBackend } from './http-client.mjs';
 
 const source = dirname(fileURLToPath(import.meta.url));
-const files = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt'];
+const files = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'login-client.js', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt'];
 const help = `Install an OpenCode Web Login service on Linux with systemd.
 
 Usage: opencode-web-login install --opencode-bin /absolute/path/opencode [options]

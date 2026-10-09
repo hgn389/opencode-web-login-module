@@ -1,4 +1,4 @@
-# OpenCode Web Login 1.0.1
+# OpenCode Web Login 1.0.2
 
 Module đăng nhập và bảo mật độc lập cho OpenCode v2. Có thể dùng như thư viện Node.js, chạy bằng CLI hoặc cài thành dịch vụ Linux. Module kết nối với OpenCode qua HTTP API, không cần sửa hay build lại mã nguồn OpenCode.
 
@@ -14,6 +14,7 @@ Yêu cầu: Node.js 24 trở lên; OpenCode v2 hỗ trợ `/api/info`, `/api/pai
 - Tối đa 40 yêu cầu vào trang đăng nhập, biểu mẫu và ảnh CAPTCHA mỗi IP mỗi phút; mỗi IP chỉ kiểm tra một mật khẩu tại một thời điểm.
 - Phiên tối đa 8 giờ, hết hạn sau 30 phút không có yêu cầu được xác thực; đăng xuất thu hồi phiên ở máy chủ.
 - Chặn việc né trang đăng nhập qua Basic Auth, token URL, cookie của OpenCode hoặc liên kết ghép nối.
+- Giữ khóa ký CSRF qua lần khởi động lại; các tab cùng trình duyệt dùng chung mã còn hiệu lực. Form tự kiểm tra và làm mới mã trước khi gửi, không tự gửi lại mật khẩu.
 - Bảo vệ CSRF, kiểm tra origin và proxy đáng tin cậy; vẫn hỗ trợ SSE và terminal WebSocket.
 - Lọc header dành riêng cho từng kết nối, giới hạn thời gian chờ backend và kiểm tra WebSocket upgrade.
 - Khi chạy qua domain HTTPS: cookie `__Host-`, Secure, HttpOnly, SameSite=Strict và HSTS.
@@ -22,10 +23,10 @@ IP dùng chung cũng dùng chung bộ đếm và khóa. Khóa này chỉ áp d�
 
 ## Cài gói trên máy khác
 
-Sao chép file `opencode-web-login-1.0.1.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
+Sao chép file `opencode-web-login-1.0.2.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
 
 ```sh
-npm install -g ./opencode-web-login-1.0.1.tgz
+npm install -g ./opencode-web-login-1.0.2.tgz
 opencode-web-login --help
 ```
 

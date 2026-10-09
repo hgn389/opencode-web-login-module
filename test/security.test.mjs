@@ -218,6 +218,60 @@ async function stop(child) {
   }
 });
 
+test('CSRF supports multiple tabs, restart, recovery and rejects forged or missing cookies', { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'opencode-csrf-test-'));
+  const dbPath = join(dir, 'security.sqlite');
+  const port = await freePort();
+  let checks = 0;
+  const backend = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/info') { checks++; res.writeHead(req.headers.authorization === auth(goodPassword) ? 200 : 401); res.end('{}'); }
+    else if (req.url === '/api/pair') res.end(JSON.stringify({ code: 'code' }));
+    else res.end(JSON.stringify({ token: nativeToken }));
+  });
+  backend.listen(0, '127.0.0.1');
+  await once(backend, 'listening');
+  const backendPort = backend.address().port;
+  let child = await start(port, backendPort, dbPath);
+  const user = { ip: '198.51.100.210' };
+  const body = (csrf) => new URLSearchParams({ csrf, username: 'opencode', password: goodPassword }).toString();
+  try {
+    const first = fields(await request(port, '/login', user));
+    const second = fields(await request(port, '/login', { ...user, cookie: first.cookie }));
+    assert.equal(first.csrf, second.csrf, 'Opening another tab must preserve a valid browser token');
+    await stop(child);
+    child = await start(port, backendPort, dbPath);
+    const afterRestart = await request(port, '/login', { ...user, cookie: first.cookie, method: 'POST', data: body(first.csrf) });
+    assert.equal(afterRestart.status, 303, 'Forms opened before restart must remain valid until their original expiry');
+    const before = checks;
+    const missing = await request(port, '/login', { ...user, method: 'POST', data: body(first.csrf) });
+    assert.equal(missing.status, 403);
+    assert(missing.body.includes('Trình duyệt chưa gửi cookie'));
+    assert.equal(checks, before);
+    assert.equal((await request(port, '/login/session', user)).status, 403, 'Refresh requires the custom same-origin header');
+    assert.equal((await request(port, '/login/session', { ...user, extra: { 'x-opencode-login': '1', origin: 'https://evil.invalid' } })).status, 403);
+    const recovered = await request(port, '/login/session', { ...user, cookie: first.cookie, extra: { 'x-opencode-login': '1' } });
+    assert.equal(recovered.status, 200);
+    const session = JSON.parse(recovered.body);
+    assert.equal(session.csrf, first.csrf);
+    const renewedCookie = recovered.headers['set-cookie'][0].split(';')[0];
+    const duplicate = await request(port, '/login', { ...user, cookie: `${renewedCookie}; opencode_csrf_${port}=stale-root-cookie`, method: 'POST', data: body(session.csrf) });
+    assert.equal(duplicate.status, 303, 'A stale less-specific cookie must not replace the valid cookie');
+    const missingBrowserCookie = await request(port, '/login/session', { ...user, extra: { 'x-opencode-login': '1' } });
+    const fresh = JSON.parse(missingBrowserCookie.body);
+    const freshCookie = missingBrowserCookie.headers['set-cookie'][0].split(';')[0];
+    assert.notEqual(fresh.csrf, first.csrf);
+    assert.equal((await request(port, '/login', { ...user, cookie: freshCookie, method: 'POST', data: body('forged-token') })).status, 403);
+    assert.equal((await request(port, '/login', { ...user, cookie: freshCookie, method: 'POST', data: body(fresh.csrf) })).status, 303);
+    assert.equal((await request(port, '/login', { ...user, ip: '198.51.100.211', cookie: freshCookie, method: 'POST', data: body(fresh.csrf) })).status, 403, 'Tokens remain bound to the client IP');
+    assert.equal((await request(port, '/login', { ...user, secure: true, cookie: freshCookie, method: 'POST', data: body(fresh.csrf) })).status, 403, 'Tokens remain bound to their origin');
+  } finally {
+    await stop(child);
+    await new Promise((resolve) => backend.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('challenge expiry and single use; session absolute expiry', () => {
   const dir = mkdtempSync(join(tmpdir(), 'opencode-state-test-'));
   const store = new SecurityStore(join(dir, 'security.sqlite'));

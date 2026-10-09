@@ -35,7 +35,10 @@ export class SecurityStore {
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, token TEXT NOT NULL, origin TEXT NOT NULL,
         created INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);`);
+      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
+      CREATE TABLE IF NOT EXISTS security_keys (name TEXT PRIMARY KEY, value BLOB NOT NULL CHECK(length(value) = 32));`);
+    this.db.prepare('INSERT OR IGNORE INTO security_keys(name, value) VALUES (?, ?)').run('csrf', randomBytes(32));
+    this.csrfKey = Buffer.from(this.db.prepare('SELECT value FROM security_keys WHERE name = ?').get('csrf').value);
     this.challenges = new Map();
     this.requests = new Map();
     this.pending = new Set();
