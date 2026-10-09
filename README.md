@@ -1,8 +1,143 @@
-# OpenCode Web Login 1.0.2
+# OpenCode Web Login Module
 
-Module đăng nhập và bảo mật độc lập cho OpenCode v2. Có thể dùng như thư viện Node.js, chạy bằng CLI hoặc cài thành dịch vụ Linux. Module kết nối với OpenCode qua HTTP API, không cần sửa hay build lại mã nguồn OpenCode.
+Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode. Module chạy thành dịch vụ riêng phía trước OpenCode, kết nối qua HTTP API và không cần sửa mã nguồn OpenCode.
 
-Yêu cầu: Node.js 24 trở lên; OpenCode v2 hỗ trợ `/api/info`, `/api/pair`, `/auth/connect/:code`; backend OpenCode phải chạy ở loopback và có mật khẩu. Bản v1 dùng API khác nên chưa được hỗ trợ. Mật khẩu vẫn do dịch vụ OpenCode quản lý.
+**Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
+
+## Cài đặt và cấu hình
+
+### 1. Chuẩn bị OpenCode và công cụ cần thiết
+
+Máy đích cần có:
+
+- OpenCode v2 đã cài, có tài khoản/mật khẩu và dịch vụ Linux đang chạy, ví dụ `opencode.service`.
+- OpenCode hỗ trợ các API `/api/info`, `/api/pair` và `/auth/connect/:code`. Bản v1 dùng API khác, chưa được module hỗ trợ.
+- Node.js **24 trở lên**, npm và Git. Node.js dùng để chạy dịch vụ phải được cài ngoài `/root` và `/home`, ví dụ trong `/usr` hoặc `/usr/local`.
+- Linux có systemd và quyền quản trị nếu chọn cài thành dịch vụ.
+
+Kiểm tra trước khi cài module:
+
+```sh
+node --version
+npm --version
+git --version
+command -v opencode
+sudo systemctl status opencode.service
+```
+
+Ghi lại đường dẫn binary từ `command -v opencode` và tên dịch vụ OpenCode thực tế. Các ví dụ bên dưới dùng `/usr/local/bin/opencode` và `opencode.service`; thay chúng theo máy của bạn. Tài khoản/mật khẩu vẫn do OpenCode quản lý, module không tạo một tài khoản khác.
+
+### 2. Tải mã nguồn module từ GitHub
+
+```sh
+sudo git clone https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+cd /opt/opencode-web-login-src
+sudo npm ci --omit=dev
+node bin/opencode-web-login.mjs --help
+```
+
+`/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+
+### 3. Cài module thành dịch vụ
+
+Chạy thử để xem cấu hình trước; lệnh có `--dry-run` không thay đổi hệ thống:
+
+```sh
+sudo node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install \
+  --opencode-bin /usr/local/bin/opencode \
+  --opencode-service opencode.service \
+  --host 127.0.0.1 \
+  --port 4096 \
+  --backend-port 4097 \
+  --dry-run
+```
+
+Sau khi kiểm tra đúng đường dẫn, tên dịch vụ và cổng, chạy lệnh cài thật:
+
+```sh
+sudo node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install \
+  --opencode-bin /usr/local/bin/opencode \
+  --opencode-service opencode.service \
+  --host 127.0.0.1 \
+  --port 4096 \
+  --backend-port 4097
+```
+
+**Truy cập từ máy khác trong LAN:** thay `--host 127.0.0.1` trong cả hai lệnh bằng IP LAN của máy chủ, ví dụ `--host 192.168.1.150`. Cho phép cổng `4096` trong firewall cho mạng LAN cần sử dụng. Module không tự mở firewall.
+
+Bộ cài sẽ:
+
+1. Kiểm tra cấu hình, dịch vụ OpenCode, tệp thực thi, quyền thư mục và cổng.
+2. Sao lưu các tệp sẽ thay đổi bằng Git tại `/var/lib/opencode-login-install-backup`, quyền `0700`.
+3. Chuẩn bị mã nguồn và thư viện theo `npm-shrinkwrap.json` trước khi dừng dịch vụ.
+4. Tạo người dùng hệ thống riêng `opencode-login`, không có shell đăng nhập.
+5. Chuyển OpenCode sang địa chỉ nội bộ `127.0.0.1:4097`, đặt gateway đăng nhập ở địa chỉ/cổng bạn chọn.
+6. Khởi động dịch vụ và kiểm tra cả trang đăng nhập lẫn backend có yêu cầu mật khẩu.
+
+Module không cài hoặc cập nhật OpenCode. Bộ cài giữ cơ sở dữ liệu phiên và khóa IP khi cài lại. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ cũ, đồng thời báo vị trí sao lưu Git.
+
+### 4. Kiểm tra và đăng nhập
+
+```sh
+sudo systemctl status opencode.service opencode-login.service
+sudo node /opt/opencode-login/bin/opencode-web-login.mjs doctor --config /etc/opencode-login.env
+```
+
+Mở một trong các địa chỉ phù hợp với `--host` đã cấu hình:
+
+- Chỉ dùng trên máy chủ: `http://127.0.0.1:4096/login`.
+- Dùng trong LAN với IP ví dụ phía trên: `http://192.168.1.150:4096/login`.
+
+Nhập tài khoản/mật khẩu OpenCode. Khi đăng nhập thành công, trình duyệt chuyển vào OpenCode. Trang đăng xuất nằm ở `/logout`.
+
+Nếu trình duyệt đang giữ trang đăng nhập cũ, nhấn `Ctrl+F5` rồi thử lại. Nếu trang báo chưa gửi cookie, cho phép cookie cho địa chỉ này. Lỗi phiên hoặc CAPTCHA không được tính là nhập sai tài khoản/mật khẩu.
+
+### 5. Thay đổi cấu hình sau khi cài
+
+Tệp cấu hình dịch vụ là `/etc/opencode-login.env`. Dữ liệu bảo mật nằm tại `/var/lib/opencode-login/security.sqlite`.
+
+| Biến | Giá trị mặc định |
+| --- | --- |
+| `LOGIN_HOST` | `127.0.0.1` |
+| `LOGIN_PORT` | `4096` |
+| `OPENCODE_BACKEND_HOST` | `127.0.0.1` |
+| `OPENCODE_BACKEND_PORT` | `4097` |
+| `LOGIN_STATE_DB` | `~/.local/state/opencode-web-login/security.sqlite` khi chạy độc lập |
+| `LOGIN_PUBLIC_ORIGINS` | Rỗng; danh sách domain HTTPS phân cách bằng dấu phẩy |
+| `LOGIN_TRUSTED_PROXIES` | `127.0.0.1,::1`; chỉ IP/CIDR của proxy do bạn kiểm soát |
+
+CLI `--config` đọc file env. Biến môi trường đã có sẵn được ưu tiên hơn file. Bộ cài Linux đặt `LOGIN_STATE_DB` rõ ràng tại `/var/lib/NAME/security.sqlite`.
+
+Sau khi chỉnh cấu hình gateway, khởi động lại dịch vụ:
+
+```sh
+sudo systemctl restart opencode-login.service
+```
+
+Nếu đổi cổng backend OpenCode, tên dịch vụ hoặc thư mục cài, chạy lại bộ cài với đầy đủ tùy chọn tương ứng để cập nhật đồng bộ. Khi cài lại, bộ cài ghi lại `/etc/opencode-login.env` theo các tùy chọn bạn truyền; hãy truyền cả cấu hình domain và proxy cũ nếu đang sử dụng.
+
+Mỗi instance cần dịch vụ OpenCode, cổng gateway/backend và nơi lưu dữ liệu riêng. Có thể tùy chỉnh bằng `--name`, `--install-dir`, `--public-origins` và `--trusted-proxies`. Xem tất cả tùy chọn:
+
+```sh
+node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install --help
+```
+
+### 6. Cấu hình domain và HTTPS
+
+Cấu hình chứng chỉ TLS trên reverse proxy, rồi thêm domain bằng `LOGIN_PUBLIC_ORIGINS=https://coding.example.com` hoặc tùy chọn installer `--public-origins`.
+
+Proxy phải giữ public Host, gửi `X-Forwarded-Proto: https` và chuỗi `X-Forwarded-For` chứa IP thật. Proxy đầu tiên phải xử lý header giả do client gửi. Chỉ thêm địa chỉ proxy đã kiểm tra vào `LOGIN_TRUSTED_PROXIES`. Nếu có Cloudflare/proxy nhiều tầng, kiểm tra dải IP và cách chuyển tiếp trước khi thêm trust.
+
+Cấu hình WebSocket upgrade, chuyển HTTP sang HTTPS và chỉ công khai cổng proxy HTTPS. Domain HTTP sẽ được chuyển sang HTTPS; gửi form qua HTTP bị từ chối. Kiểm tra IP thật và khóa IP từ bên ngoài LAN trước khi đưa vào sử dụng.
+
+Ví dụ khi reverse proxy chạy trên cùng máy:
+
+```dotenv
+LOGIN_PUBLIC_ORIGINS=https://coding.example.com
+LOGIN_TRUSTED_PROXIES=127.0.0.1,::1
+```
+
+Thay `coding.example.com` bằng domain của bạn, cấu hình DNS/chứng chỉ và reverse proxy riêng, rồi khởi động lại gateway. Chỉ dùng HTTP trực tiếp trong mạng LAN tin cậy; khi đưa lên Internet, dùng HTTPS và giữ cổng backend OpenCode ở loopback.
 
 ## Các quy tắc bảo mật
 
@@ -21,68 +156,33 @@ Yêu cầu: Node.js 24 trở lên; OpenCode v2 hỗ trợ `/api/info`, `/api/pai
 
 IP dùng chung cũng dùng chung bộ đếm và khóa. Khóa này chỉ áp dụng tại gateway OpenCode, không chặn các website khác. Các luồng SSE/WebSocket kiểm tra lại phiên mỗi 30 giây. CAPTCHA ảnh là lớp giảm bot; khi mở Internet nên bổ sung MFA hoặc dịch vụ kiểm tra bot chuyên dụng.
 
-## Cài gói trên máy khác
+## Chạy độc lập thay cho systemd
 
-Sao chép file `opencode-web-login-1.0.2.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
+Cách này dành cho việc chạy thử hoặc tích hợp vào hệ thống khác. OpenCode vẫn phải được cài và cấu hình mật khẩu trước.
 
-```sh
-npm install -g ./opencode-web-login-1.0.2.tgz
-opencode-web-login --help
-```
-
-Gói được phân phối bằng file, chưa được đưa lên npm registry. Nếu cài global vào thư mục hệ thống, chạy lệnh npm với quyền quản trị phù hợp.
-
-### Chạy độc lập
+Trong một terminal, chạy OpenCode ở loopback:
 
 ```sh
-# OpenCode dùng tài khoản/mật khẩu đã được cấu hình của bạn.
 opencode serve --hostname 127.0.0.1 --port 4097
 ```
 
-Ở terminal khác, tạo cấu hình từ `environment.example`, rồi chạy:
+Trong terminal khác, tại thư mục mã nguồn module:
 
 ```sh
-opencode-web-login serve --config /absolute/path/login.env
+cp environment.example login.env
+# Chỉnh login.env theo địa chỉ/cổng muốn sử dụng.
+node bin/opencode-web-login.mjs serve --config "$PWD/login.env"
 ```
 
-Mặc định gateway chỉ nghe ở `127.0.0.1:4096`. Mở `http://127.0.0.1:4096/login`. Muốn truy cập LAN, đặt `LOGIN_HOST` thành IP LAN thật và cho phép cổng tương ứng trong firewall của bạn. Module không tự mở firewall.
-
-Trang đăng xuất: `/logout`. API/CLI của OpenCode trên máy chủ kết nối trực tiếp với backend loopback; gateway bên ngoài chỉ nhận phiên tạo qua trang đăng nhập.
-
-### Cài dịch vụ Linux
-
-Thay đường dẫn binary OpenCode, tên dịch vụ và địa chỉ bên dưới theo máy đích. Không dùng backend công khai.
-
-```sh
-sudo opencode-web-login install \
-  --opencode-bin /usr/local/bin/opencode \
-  --opencode-service opencode.service \
-  --host 127.0.0.1 \
-  --port 4096 \
-  --backend-port 4097 \
-  --dry-run
-```
-
-`--dry-run` in ra cấu hình đầy đủ để kiểm tra, không thay đổi hệ thống. Bỏ `--dry-run` để cài. Các tùy chọn thêm:
-
-```sh
-opencode-web-login install --help
-```
-
-Bộ cài sẽ:
-
-1. Kiểm tra cấu hình, dịch vụ OpenCode, tệp thực thi, quyền thư mục và cổng đang sử dụng.
-2. Sao lưu những file sẽ thay đổi bằng Git tại `/var/lib/NAME-install-backup`, quyền `0700`.
-3. Chuẩn bị mã nguồn và thư viện trong thư mục tạm theo `npm-shrinkwrap.json` trước khi dừng dịch vụ.
-4. Tạo user riêng không có shell; dữ liệu nằm ở `/var/lib/NAME/security.sqlite`.
-5. Sinh file `/etc/NAME.env`, unit `NAME.service` và override backend để chỉ nghe loopback.
-6. Khởi động lại backend, bật gateway; kiểm tra cả trang đăng nhập và backend có yêu cầu mật khẩu.
-
-Mặc định `NAME=opencode-login`, thư mục mã nguồn `/opt/opencode-login`. Dùng `--name` và `--install-dir` để đổi. Mỗi instance cần cổng, service backend và nơi lưu dữ liệu riêng. Khi cài lại, truyền đúng các tùy chọn cũ; bộ cài giữ cơ sở dữ liệu, nhưng ghi lại cấu hình từ các tùy chọn bạn truyền.
-
-Bộ cài không đổi DNS, TLS hoặc firewall, và không cài/cập nhật OpenCode. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ trước đó. Vị trí sao lưu Git luôn được báo trong lỗi; nếu khôi phục tự động thất bại, thư viện cũ được giữ trong thư mục tạm để quản trị viên khôi phục thủ công. Không dùng thư mục home cho mã nguồn dịch vụ vì unit chặn quyền truy cập home.
+Gateway mặc định nghe ở `127.0.0.1:4096`. Không chạy cách này đồng thời với dịch vụ đã chiếm cùng cổng. API/CLI OpenCode trên máy chủ có thể kết nối trực tiếp backend loopback; gateway bên ngoài chỉ nhận phiên tạo qua trang đăng nhập.
 
 ## Dùng như thư viện
+
+Trong ứng dụng Node.js riêng, cài module từ bản clone trước:
+
+```sh
+npm install /opt/opencode-web-login-src
+```
 
 ```js
 import { createLoginServer } from 'opencode-web-login';
@@ -106,29 +206,15 @@ Import module không mở cổng, tạo database hoặc đăng ký signal handle
 
 Có thể lấy cấu hình từ biến môi trường bằng `configFromEnv()` hoặc kiểm tra cấu hình bằng `normalizeConfig()`. Gateway và backend phải có endpoint khác nhau; backend chỉ được dùng địa chỉ loopback. Font CAPTCHA được đóng gói cùng module, không phụ thuộc đường dẫn font trên máy đích.
 
-## Cấu hình
-
-| Biến | Giá trị mặc định |
-| --- | --- |
-| `LOGIN_HOST` | `127.0.0.1` |
-| `LOGIN_PORT` | `4096` |
-| `OPENCODE_BACKEND_HOST` | `127.0.0.1` |
-| `OPENCODE_BACKEND_PORT` | `4097` |
-| `LOGIN_STATE_DB` | `~/.local/state/opencode-web-login/security.sqlite` khi chạy độc lập |
-| `LOGIN_PUBLIC_ORIGINS` | Rỗng; danh sách domain HTTPS phân cách bằng dấu phẩy |
-| `LOGIN_TRUSTED_PROXIES` | `127.0.0.1,::1`; chỉ IP/CIDR của proxy do bạn kiểm soát |
-
-CLI `--config` đọc file env. Biến môi trường đã có sẵn được ưu tiên hơn file. Linux installer đặt `LOGIN_STATE_DB` rõ ràng tại `/var/lib/NAME/security.sqlite`.
-
 ## Quản trị
 
 ```sh
-opencode-web-login doctor --config /etc/opencode-login.env
+sudo node /opt/opencode-login/bin/opencode-web-login.mjs doctor --config /etc/opencode-login.env
 
-# Đọc/mở khóa database dưới đúng user sở hữu.
-sudo -u opencode-login opencode-web-login blocked --config /etc/opencode-login.env
-sudo -u opencode-login opencode-web-login unblock 192.0.2.10 --config /etc/opencode-login.env
-sudo -u opencode-login opencode-web-login revoke-sessions --config /etc/opencode-login.env
+# Đọc/mở khóa database dưới đúng người dùng sở hữu.
+sudo -u opencode-login node /opt/opencode-login/bin/opencode-web-login.mjs blocked --config /etc/opencode-login.env
+sudo -u opencode-login node /opt/opencode-login/bin/opencode-web-login.mjs unblock 192.0.2.10 --config /etc/opencode-login.env
+sudo -u opencode-login node /opt/opencode-login/bin/opencode-web-login.mjs revoke-sessions --config /etc/opencode-login.env
 
 systemctl status opencode-login
 journalctl -u opencode-login --since today
@@ -138,23 +224,25 @@ journalctl -u opencode-login --since today
 
 Trên Linux, thư mục cơ sở dữ liệu phải thuộc người chạy dịch vụ và có quyền `0700`; tệp cơ sở dữ liệu/WAL/SHM phải là tệp thường thuộc cùng người dùng, quyền `0600`. Module từ chối tệp liên kết hoặc quyền quá rộng. Không đưa database, WAL hoặc các file env chứa bí mật vào Git hay gói cài đặt. Nhật ký không ghi mật khẩu, đáp án CAPTCHA hoặc session token. Đổi mật khẩu OpenCode khiến native token cũ bị từ chối; gateway thu hồi phiên bị backend từ chối.
 
-## Domain HTTPS
+## Cập nhật mã nguồn và quy trình phát hành
 
-Cấu hình chứng chỉ TLS trên reverse proxy, rồi thêm domain bằng `LOGIN_PUBLIC_ORIGINS=https://coding.example.com` hoặc tùy chọn installer `--public-origins`.
+Repository chính: [hgn389/opencode-web-login-module](https://github.com/hgn389/opencode-web-login-module), nhánh `main`.
 
-Proxy phải giữ public Host, gửi `X-Forwarded-Proto: https` và chuỗi `X-Forwarded-For` chứa IP thật. Proxy đầu tiên phải xử lý header giả do client gửi. Chỉ thêm địa chỉ proxy đã kiểm tra vào `LOGIN_TRUSTED_PROXIES`. Nếu có Cloudflare/proxy nhiều tầng, kiểm tra dải IP và cách chuyển tiếp trước khi thêm trust.
-
-Cấu hình WebSocket upgrade, chuyển HTTP sang HTTPS và chỉ công khai cổng proxy HTTPS. Domain HTTP sẽ được chuyển sang HTTPS; gửi form qua HTTP bị từ chối. Kiểm tra IP thật và khóa IP từ bên ngoài LAN trước khi đưa vào sử dụng.
-
-## Phát triển và đóng gói
-
-Tại thư mục source có test:
+Sau khi hoàn tất một lần sửa mã nguồn, chạy kiểm tra phù hợp, commit và push lên GitHub. Thay `duong-dan/tep-da-sua` bằng những tệp thực tế đã sửa:
 
 ```sh
 npm ci
 npm test
-mkdir -p dist
-npm pack --pack-destination dist
+git diff --check
+git add duong-dan/tep-da-sua
+git commit -m "Mo ta thay doi"
+git push origin main
 ```
 
-Test dùng database tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Bản chạy thực tế không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Gói cài chỉ chứa source, giao diện, font, license font và dependency lock; không chứa cấu hình máy đang chạy, database hay lịch sử Git.
+**Commit/push chỉ cập nhật mã nguồn. Chỉ phát hành phiên bản mới khi chủ repository xác nhận rõ ràng.** Trước khi có xác nhận, không tự tăng version, tạo/push tag phiên bản, tạo GitHub Release, đưa gói lên npm hoặc tải lên tệp phát hành.
+
+`git push` không tự cập nhật dịch vụ trên máy đã cài. Muốn áp dụng mã nguồn mới lên một máy, cập nhật bản clone tại `/opt/opencode-web-login-src`, rồi chạy lại bộ cài với đầy đủ tùy chọn đã dùng trên máy đó.
+
+Các quy tắc làm việc được ghi trong [AGENTS.md](AGENTS.md). Không commit file env chứa bí mật, cơ sở dữ liệu, khóa riêng, log hoặc thư mục `node_modules`. Bản sao lưu cấu hình trên máy chủ nằm ngoài repository công khai này.
+
+Test dùng cơ sở dữ liệu tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Bản chạy thực tế không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Các tài nguyên CAPTCHA và giấy phép font được lưu cùng mã nguồn.
