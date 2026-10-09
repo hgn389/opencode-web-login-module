@@ -4,6 +4,8 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
 
+**Bản thử nghiệm:** [v.1.0.0 beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.0.0-beta). Phiên bản gói: `1.0.0-beta`.
+
 ## Cài đặt và cấu hình
 
 ### 1. Chuẩn bị OpenCode và công cụ cần thiết
@@ -30,13 +32,25 @@ Ghi lại đường dẫn binary từ `command -v opencode` và tên dịch vụ
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch v1.0.0-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
 sudo npm ci --omit=dev
 node bin/opencode-web-login.mjs --help
 ```
 
-`/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy đúng bản beta đã phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+
+#### Cài từ gói `.tgz` trên GitHub Release
+
+Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.0.0-beta.tgz` và `opencode-web-login-1.0.0-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.0.0-beta). Trong thư mục đã tải, chạy:
+
+```sh
+sha256sum --check opencode-web-login-1.0.0-beta.tgz.sha256
+sudo npm install -g ./opencode-web-login-1.0.0-beta.tgz
+opencode-web-login --help
+```
+
+Sau khi cài gói, dùng `sudo opencode-web-login install` thay cho `sudo node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install` trong các lệnh ở bước 3, giữ nguyên các tùy chọn phù hợp với máy của bạn. Gói phát hành cần tải thư viện từ npm khi cài đặt; không có mật khẩu hoặc cấu hình của máy chủ trong gói.
 
 ### 3. Cài module thành dịch vụ
 
@@ -231,6 +245,8 @@ Repository chính: [hgn389/opencode-web-login-module](https://github.com/hgn389/
 Sau khi hoàn tất một lần sửa mã nguồn, chạy kiểm tra phù hợp, commit và push lên GitHub. Thay `duong-dan/tep-da-sua` bằng những tệp thực tế đã sửa:
 
 ```sh
+git switch main
+git pull --ff-only origin main
 npm ci
 npm test
 git diff --check
