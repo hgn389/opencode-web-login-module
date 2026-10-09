@@ -7,21 +7,23 @@ export function defaultStatePath() {
 }
 
 function port(value, name) {
+  if (!['string', 'number'].includes(typeof value) || (typeof value === 'string' && !/^\d+$/.test(value))) throw new Error(`${name} must be an integer between 1 and 65535`);
   const result = Number(value);
   if (!Number.isInteger(result) || result < 1 || result > 65535) throw new Error(`${name} must be an integer between 1 and 65535`);
   return result;
 }
 
 export function normalizeConfig(input = {}) {
-  const host = input.host ?? '127.0.0.1';
+  let host = input.host ?? '127.0.0.1';
   if (!isIP(host)) throw new Error('host must be an IPv4 or IPv6 listen address');
+  if (isIP(host) === 6) host = new URL(`http://[${host}]`).hostname.slice(1, -1);
   const listenPort = port(input.port ?? 4096, 'port');
   const backendHost = input.backendHost ?? '127.0.0.1';
   if (!['127.0.0.1', '::1'].includes(backendHost)) throw new Error('The OpenCode backend must listen on loopback');
   const backendPort = port(input.backendPort ?? 4097, 'backendPort');
   if ((host === backendHost || ['0.0.0.0', '::'].includes(host)) && listenPort === backendPort) throw new Error('Gateway and backend ports must be different');
   const statePath = input.statePath ?? defaultStatePath();
-  if (typeof statePath !== 'string' || !isAbsolute(statePath)) throw new Error('statePath must be an absolute filename');
+  if (typeof statePath !== 'string' || statePath.includes('\0') || !isAbsolute(statePath)) throw new Error('statePath must be an absolute filename');
   const publicOrigins = input.publicOrigins ?? [];
   const trustedProxies = input.trustedProxies ?? ['127.0.0.1', '::1'];
   if (!Array.isArray(publicOrigins) || !Array.isArray(trustedProxies)) throw new Error('publicOrigins and trustedProxies must be arrays');

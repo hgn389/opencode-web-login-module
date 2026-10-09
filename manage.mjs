@@ -1,12 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
-import { statSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { defaultStatePath } from './config.mjs';
 
 export function manage(command, input, path = defaultStatePath()) {
-  if (statSync(path).uid !== process.getuid()) {
-    console.error('Run this command as the opencode-login service user.');
+  const info = lstatSync(path);
+  if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077)) {
     throw new Error('Run this command as the database owner');
   }
   const db = new DatabaseSync(path, { allowExtension: false });
@@ -23,8 +23,7 @@ export function manage(command, input, path = defaultStatePath()) {
       const result = db.prepare('DELETE FROM sessions').run();
       console.log(JSON.stringify({ event: 'sessions_revoked', count: result.changes, at: new Date().toISOString() }));
     } else {
-      console.error('Usage: node manage.mjs blocked | unblock IP | revoke-sessions');
-      process.exitCode = 1;
+      throw new Error('Usage: node manage.mjs blocked | unblock IP | revoke-sessions');
     }
   } finally { db.close(); }
 }

@@ -1,4 +1,4 @@
-# OpenCode Web Login 1.0.0
+# OpenCode Web Login 1.0.1
 
 Module đăng nhập và bảo mật độc lập cho OpenCode v2. Có thể dùng như thư viện Node.js, chạy bằng CLI hoặc cài thành dịch vụ Linux. Module kết nối với OpenCode qua HTTP API, không cần sửa hay build lại mã nguồn OpenCode.
 
@@ -6,25 +6,26 @@ Yêu cầu: Node.js 24 trở lên; OpenCode v2 hỗ trợ `/api/info`, `/api/pai
 
 ## Các quy tắc bảo mật
 
-- Sai user/password 5 lần: hiện CAPTCHA ảnh; những lần tiếp theo phải giải đúng CAPTCHA.
-- Sai user/password 10 lần: khóa IP vĩnh viễn đến khi quản trị viên mở khóa.
+- Sai tên đăng nhập hoặc mật khẩu 5 lần: hiện CAPTCHA ảnh; những lần tiếp theo phải giải đúng CAPTCHA.
+- Sai tên đăng nhập hoặc mật khẩu 10 lần: khóa IP vĩnh viễn đến khi quản trị viên mở khóa.
 - Đăng nhập đúng trước khi bị khóa đặt lại bộ đếm lỗi liên tiếp.
 - Bộ đếm và khóa IP lưu trong SQLite, giữ qua các lần khởi động lại.
-- CAPTCHA tồn tại 5 phút, dùng một lần; sai CAPTCHA không tăng bộ đếm user/password.
-- Tối đa 40 yêu cầu vào trang/form/CAPTCHA mỗi IP mỗi phút; mỗi IP chỉ kiểm tra một mật khẩu tại một thời điểm.
-- Phiên tối đa 8 giờ, hết hạn sau 30 phút không hoạt động; đăng xuất thu hồi phiên ở máy chủ.
-- Chặn việc né trang đăng nhập qua Basic Auth, token URL, cookie native hoặc link pairing.
+- CAPTCHA tồn tại 5 phút, dùng một lần; sai CAPTCHA không tăng bộ đếm tên đăng nhập/mật khẩu.
+- Tối đa 40 yêu cầu vào trang đăng nhập, biểu mẫu và ảnh CAPTCHA mỗi IP mỗi phút; mỗi IP chỉ kiểm tra một mật khẩu tại một thời điểm.
+- Phiên tối đa 8 giờ, hết hạn sau 30 phút không có yêu cầu được xác thực; đăng xuất thu hồi phiên ở máy chủ.
+- Chặn việc né trang đăng nhập qua Basic Auth, token URL, cookie của OpenCode hoặc liên kết ghép nối.
 - Bảo vệ CSRF, kiểm tra origin và proxy đáng tin cậy; vẫn hỗ trợ SSE và terminal WebSocket.
+- Lọc header dành riêng cho từng kết nối, giới hạn thời gian chờ backend và kiểm tra WebSocket upgrade.
 - Khi chạy qua domain HTTPS: cookie `__Host-`, Secure, HttpOnly, SameSite=Strict và HSTS.
 
 IP dùng chung cũng dùng chung bộ đếm và khóa. Khóa này chỉ áp dụng tại gateway OpenCode, không chặn các website khác. Các luồng SSE/WebSocket kiểm tra lại phiên mỗi 30 giây. CAPTCHA ảnh là lớp giảm bot; khi mở Internet nên bổ sung MFA hoặc dịch vụ kiểm tra bot chuyên dụng.
 
 ## Cài gói trên máy khác
 
-Sao chép file `opencode-web-login-1.0.0.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
+Sao chép file `opencode-web-login-1.0.1.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
 
 ```sh
-npm install -g ./opencode-web-login-1.0.0.tgz
+npm install -g ./opencode-web-login-1.0.1.tgz
 opencode-web-login --help
 ```
 
@@ -67,18 +68,18 @@ sudo opencode-web-login install \
 opencode-web-login install --help
 ```
 
-Installer sẽ:
+Bộ cài sẽ:
 
-1. Kiểm tra cấu hình, backend service, executable và cổng đang sử dụng.
+1. Kiểm tra cấu hình, dịch vụ OpenCode, tệp thực thi, quyền thư mục và cổng đang sử dụng.
 2. Sao lưu những file sẽ thay đổi bằng Git tại `/var/lib/NAME-install-backup`, quyền `0700`.
-3. Cài mã nguồn và dependency theo `npm-shrinkwrap.json`.
+3. Chuẩn bị mã nguồn và thư viện trong thư mục tạm theo `npm-shrinkwrap.json` trước khi dừng dịch vụ.
 4. Tạo user riêng không có shell; dữ liệu nằm ở `/var/lib/NAME/security.sqlite`.
 5. Sinh file `/etc/NAME.env`, unit `NAME.service` và override backend để chỉ nghe loopback.
-6. Khởi động lại backend, bật gateway và kiểm tra trang đăng nhập.
+6. Khởi động lại backend, bật gateway; kiểm tra cả trang đăng nhập và backend có yêu cầu mật khẩu.
 
-Mặc định `NAME=opencode-login`, thư mục mã nguồn `/opt/opencode-login`. Dùng `--name` và `--install-dir` để đổi. Mỗi instance cần cổng, service backend và nơi lưu dữ liệu riêng. Khi cài lại, truyền đúng các tùy chọn cũ; installer giữ database, nhưng ghi lại cấu hình từ các tùy chọn bạn truyền.
+Mặc định `NAME=opencode-login`, thư mục mã nguồn `/opt/opencode-login`. Dùng `--name` và `--install-dir` để đổi. Mỗi instance cần cổng, service backend và nơi lưu dữ liệu riêng. Khi cài lại, truyền đúng các tùy chọn cũ; bộ cài giữ cơ sở dữ liệu, nhưng ghi lại cấu hình từ các tùy chọn bạn truyền.
 
-Installer không đổi DNS, TLS hoặc firewall, và không cài/cập nhật OpenCode. Nếu cài thất bại, vị trí backup được báo để khôi phục các file cấu hình. Không dùng thư mục home cho mã nguồn dịch vụ vì unit chặn quyền truy cập home.
+Bộ cài không đổi DNS, TLS hoặc firewall, và không cài/cập nhật OpenCode. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ trước đó. Vị trí sao lưu Git luôn được báo trong lỗi; nếu khôi phục tự động thất bại, thư viện cũ được giữ trong thư mục tạm để quản trị viên khôi phục thủ công. Không dùng thư mục home cho mã nguồn dịch vụ vì unit chặn quyền truy cập home.
 
 ## Dùng như thư viện
 
@@ -100,7 +101,7 @@ await login.listen();
 await login.close();
 ```
 
-Import module không mở cổng, tạo database hoặc đăng ký signal handler. Mỗi instance có store, phiên và bộ đếm riêng. Hàm `close()` không thoát tiến trình của ứng dụng chủ. `login.server` là HTTP server nếu cần gắn thêm event; `login.config` là cấu hình đã kiểm tra.
+Import module không mở cổng, tạo database hoặc đăng ký signal handler. Mỗi instance có store, phiên và bộ đếm riêng. Hàm `close()` không thoát tiến trình của ứng dụng chủ; nó hủy yêu cầu backend đang chờ và xử lý an toàn khi được gọi trong lúc `listen()` chưa hoàn tất. `login.server` là HTTP server nếu cần gắn thêm event; `login.config` là cấu hình đã kiểm tra.
 
 Có thể lấy cấu hình từ biến môi trường bằng `configFromEnv()` hoặc kiểm tra cấu hình bằng `normalizeConfig()`. Gateway và backend phải có endpoint khác nhau; backend chỉ được dùng địa chỉ loopback. Font CAPTCHA được đóng gói cùng module, không phụ thuộc đường dẫn font trên máy đích.
 
@@ -134,7 +135,7 @@ journalctl -u opencode-login --since today
 
 `doctor` kiểm tra cấu hình và backend có phản hồi JSON yêu cầu xác thực. Nó không thử mật khẩu và không chứng minh mọi API của các phiên bản OpenCode tương lai đều tương thích.
 
-Database chỉ cho user dịch vụ đọc, thư mục `0700`, file `0600`. Không đưa database, WAL hoặc các file env chứa bí mật vào Git hay gói cài đặt. Nhật ký không ghi mật khẩu, đáp án CAPTCHA hoặc session token. Đổi mật khẩu OpenCode khiến native token cũ bị từ chối; gateway thu hồi phiên bị backend từ chối.
+Trên Linux, thư mục cơ sở dữ liệu phải thuộc người chạy dịch vụ và có quyền `0700`; tệp cơ sở dữ liệu/WAL/SHM phải là tệp thường thuộc cùng người dùng, quyền `0600`. Module từ chối tệp liên kết hoặc quyền quá rộng. Không đưa database, WAL hoặc các file env chứa bí mật vào Git hay gói cài đặt. Nhật ký không ghi mật khẩu, đáp án CAPTCHA hoặc session token. Đổi mật khẩu OpenCode khiến native token cũ bị từ chối; gateway thu hồi phiên bị backend từ chối.
 
 ## Domain HTTPS
 
@@ -155,4 +156,4 @@ mkdir -p dist
 npm pack --pack-destination dist
 ```
 
-Test dùng database tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Production không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Gói cài chỉ chứa source, giao diện, font, license font và dependency lock; không chứa cấu hình máy đang chạy, database hay lịch sử Git.
+Test dùng database tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Bản chạy thực tế không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Gói cài chỉ chứa source, giao diện, font, license font và dependency lock; không chứa cấu hình máy đang chạy, database hay lịch sử Git.

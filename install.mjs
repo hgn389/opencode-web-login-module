@@ -1,15 +1,15 @@
 import { parseArgs } from 'node:util';
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync, lstatSync, chownSync, renameSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import net from 'node:net';
-import http from 'node:http';
 import { normalizeConfig } from './config.mjs';
+import { readResponse, protectedBackend } from './http-client.mjs';
 
 const source = dirname(fileURLToPath(import.meta.url));
-const files = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt'];
+const files = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt'];
 const help = `Install an OpenCode Web Login service on Linux with systemd.
 
 Usage: opencode-web-login install --opencode-bin /absolute/path/opencode [options]
@@ -31,7 +31,7 @@ DNS or TLS configuration. For access on a LAN address, supply --host explicitly.
 `;
 
 function path(value, name) {
-  if (!isAbsolute(value) || /[\x00-\x1f%$]/.test(value)) throw new Error(`${name} must be an absolute path without control characters, % or $`);
+  if (!isAbsolute(value) || /[\x00-\x1f\x7f%$"\\]/.test(value) || value.trim() !== value) throw new Error(`${name} must be an absolute path without control characters, quotes, backslashes, % or $`);
   return resolve(value);
 }
 function command(binary, args) { return execFileSync(binary, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -59,36 +59,57 @@ async function checkPort(config, name) {
     if (!owned) throw new Error(`Login port ${config.authority} is already used by another process`);
   }
 }
-function ready(config) {
-  return new Promise((resolve) => {
+async function ready(config) {
+  try {
     const host = config.host === '0.0.0.0' ? '127.0.0.1' : config.host === '::' ? '::1' : config.host;
-    const request = http.get({ hostname: host, port: config.port, path: '/login', headers: { host: config.authority } }, (response) => {
-      let body = '';
-      response.on('data', (chunk) => { if (body.length < 65536) body += chunk; });
-      response.on('end', () => resolve([200, 403].includes(response.statusCode) && body.includes('name="csrf"')));
-      response.on('error', () => resolve(false));
-    });
-    request.setTimeout(500, () => request.destroy());
-    request.on('error', () => resolve(false));
-  });
+    const response = await readResponse({ hostname: host, port: config.port, path: '/login', headers: { host: config.authority } }, { timeout: 500 });
+    return [200, 403].includes(response.status) && response.body.includes('name="csrf"') && await protectedBackend(config, 500);
+  } catch { return false; }
 }
 function backup(name, targets) {
   const repo = `/var/lib/${name}-install-backup`;
   mkdirSync(repo, { recursive: true, mode: 0o700 });
   chmodSync(repo, 0o700);
   if (!existsSync(join(repo, '.git'))) command('git', ['init', '--quiet', repo]);
+  const entries = [];
   for (const target of targets) {
-    if (!existsSync(target)) continue;
     const dest = join(repo, target.slice(1));
+    const info = lstatSync(target, { throwIfNoEntry: false });
+    if (!info) { rmSync(dest, { force: true }); entries.push({ target, exists: false }); continue; }
+    if (!info.isFile() || info.uid !== 0 || (info.mode & 0o022)) throw new Error(`Installation target must be a regular root-owned file without group/other write access: ${target}`);
+    entries.push({ target, exists: true, mode: info.mode & 0o777, uid: info.uid, gid: info.gid });
     mkdirSync(dirname(dest), { recursive: true, mode: 0o700 });
     copyFileSync(target, dest);
     chmodSync(dest, 0o600);
   }
+  writeFileSync(join(repo, 'snapshot.json'), JSON.stringify(entries, null, 2), { mode: 0o600 });
   commit(repo, 'Back up configuration before installing the login module');
-  return repo;
+  return { repo, entries };
+}
+
+function restore({ repo, entries }) {
+  for (const entry of entries) {
+    if (!entry.exists) { rmSync(entry.target, { force: true }); continue; }
+    copyFileSync(join(repo, entry.target.slice(1)), entry.target);
+    chmodSync(entry.target, entry.mode);
+    chownSync(entry.target, entry.uid, entry.gid);
+  }
+}
+
+function isActive(unit) {
+  return command('systemctl', ['show', unit, '-p', 'ActiveState', '--value']) === 'active';
+}
+
+function secureParents(target) {
+  for (let current = target; current !== '/'; current = dirname(current)) {
+    if (!existsSync(current)) continue;
+    const info = lstatSync(current);
+    if (!info.isDirectory() || info.uid !== 0 || (info.mode & 0o022)) throw new Error(`Installation directories must be root-owned and not writable by other users: ${current}`);
+  }
 }
 
 export async function install(args) {
+  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required');
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'opencode-bin': { type: 'string' }, 'opencode-service': { type: 'string' }, name: { type: 'string' },
     'install-dir': { type: 'string' }, host: { type: 'string' }, port: { type: 'string' },
@@ -157,47 +178,106 @@ WantedBy=multi-user.target
   if (values['dry-run']) { console.log(JSON.stringify(plan, null, 2)); return plan; }
   if (process.platform !== 'linux' || process.getuid() !== 0) throw new Error('System service installation requires root on Linux');
   accessSync(opencode, constants.X_OK);
+  for (const file of files) accessSync(join(source, file), constants.R_OK);
   command('git', ['--version']);
   if (command('systemctl', ['show', backendService, '-p', 'LoadState', '--value']) !== 'loaded') throw new Error('Install and configure the existing OpenCode service first');
   await checkPort(config, name);
+  secureParents(directory);
+  for (const file of files) secureParents(dirname(join(directory, file)));
+  secureParents(`/var/lib/${name}-install-backup`);
+  for (const target of Object.keys(plan.files)) secureParents(dirname(target));
   const validation = mkdtempSync(join(tmpdir(), `${name}-unit-`));
   try {
     const file = join(validation, `${name}.service`);
     writeFileSync(file, unit);
     command('systemd-analyze', ['verify', file]);
   } finally { rmSync(validation, { recursive: true, force: true }); }
-  const repo = backup(name, [...Object.keys(plan.files), ...files.map((file) => join(directory, file))]);
   let account;
   try { account = command('getent', ['passwd', name]).split(':'); }
   catch (error) { if (error.status !== 2) throw error; }
   if (account) {
     if (account[5] !== `/var/lib/${name}` || !account[6].endsWith('/nologin')) throw new Error('Existing service user must have its own state home and nologin shell');
+    const group = command('getent', ['group', name]).split(':');
+    if (group[2] !== account[3]) throw new Error('The service user must use its own matching primary group');
   }
-  mkdirSync(directory, { recursive: true, mode: 0o755 });
-  for (const file of files) {
-    const dest = join(directory, file);
-    mkdirSync(dirname(dest), { recursive: true, mode: 0o755 });
-    if (resolve(join(source, file)) !== resolve(dest)) copyFileSync(join(source, file), dest);
-    chmodSync(dest, file.startsWith('bin/') ? 0o755 : 0o644);
-  }
-  if (!account) command('useradd', ['--system', '--user-group', '--home-dir', `/var/lib/${name}`, '--shell', '/usr/sbin/nologin', name]);
-  execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: directory, stdio: 'inherit' });
-  for (const [target, content] of Object.entries(plan.files)) {
-    mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
-    writeFileSync(target, content, { mode: target === envPath ? 0o640 : 0o644 });
-    chmodSync(target, target === envPath ? 0o640 : 0o644);
-  }
-  command('chown', [`root:${name}`, envPath]);
-  command('systemctl', ['daemon-reload']);
-  command('systemctl', ['enable', `${name}.service`]);
-  command('systemctl', ['restart', backendService]);
-  command('systemctl', ['restart', `${name}.service`]);
-  for (let attempt = 0; attempt < 50; attempt++) {
-    if (command('systemctl', ['show', `${name}.service`, '-p', 'ActiveState', '--value']) === 'active' && await ready(config)) {
-      console.log(JSON.stringify({ installed: true, service: `${name}.service`, config: envPath, gateway: config.localOrigin, backup: repo }, null, 2));
-      return plan;
+  const snapshot = backup(name, [...Object.keys(plan.files), ...files.map((file) => join(directory, file))]);
+  const loginWasActive = isActive(`${name}.service`);
+  const backendWasActive = isActive(backendService);
+  let loginWasEnabled = false;
+  let loginWasEnabledAtRuntime = false;
+  try {
+    const enabled = command('systemctl', ['is-enabled', `${name}.service`]);
+    loginWasEnabled = enabled === 'enabled';
+    loginWasEnabledAtRuntime = enabled === 'enabled-runtime';
+  } catch {}
+  mkdirSync(dirname(directory), { recursive: true, mode: 0o755 });
+  const staging = mkdtempSync(join(dirname(directory), `.${name}-install-`));
+  const oldDependencies = join(staging, 'previous-node_modules');
+  let changed = false;
+  let replacedDependencies = false;
+  try {
+    for (const file of files) {
+      const dest = join(staging, file);
+      mkdirSync(dirname(dest), { recursive: true, mode: 0o755 });
+      copyFileSync(join(source, file), dest);
+      chmodSync(dest, file.startsWith('bin/') ? 0o755 : 0o644);
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: staging, stdio: 'inherit' });
+    if (!account) command('useradd', ['--system', '--user-group', '--home-dir', `/var/lib/${name}`, '--shell', '/usr/sbin/nologin', name]);
+    changed = true;
+    if (loginWasActive || existsSync(servicePath)) command('systemctl', ['stop', `${name}.service`]);
+    mkdirSync(directory, { recursive: true, mode: 0o755 });
+    for (const file of files) {
+      const dest = join(directory, file);
+      mkdirSync(dirname(dest), { recursive: true, mode: 0o755 });
+      copyFileSync(join(staging, file), dest);
+      chmodSync(dest, file.startsWith('bin/') ? 0o755 : 0o644);
+    }
+    if (existsSync(join(directory, 'node_modules'))) renameSync(join(directory, 'node_modules'), oldDependencies);
+    replacedDependencies = true;
+    renameSync(join(staging, 'node_modules'), join(directory, 'node_modules'));
+    for (const [target, content] of Object.entries(plan.files)) {
+      mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
+      writeFileSync(target, content, { mode: target === envPath ? 0o640 : 0o644 });
+      chmodSync(target, target === envPath ? 0o640 : 0o644);
+    }
+    command('chown', [`root:${name}`, envPath]);
+    command('systemctl', ['daemon-reload']);
+    command('systemctl', ['enable', `${name}.service`]);
+    command('systemctl', ['restart', backendService]);
+    command('systemctl', ['restart', `${name}.service`]);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if (isActive(`${name}.service`) && isActive(backendService) && await ready(config)) {
+        rmSync(oldDependencies, { recursive: true, force: true });
+        console.log(JSON.stringify({ installed: true, service: `${name}.service`, config: envPath, gateway: config.localOrigin, backup: snapshot.repo }, null, 2));
+        return plan;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('The gateway or password-protected OpenCode backend did not become ready');
+  } catch (error) {
+    let rollback = 'No running configuration was changed';
+    if (changed) {
+      try {
+        command('systemctl', ['stop', `${name}.service`]);
+        if (!loginWasEnabled) command('systemctl', ['disable', `${name}.service`]);
+        restore(snapshot);
+        if (replacedDependencies) {
+          rmSync(join(directory, 'node_modules'), { recursive: true, force: true });
+          if (existsSync(oldDependencies)) renameSync(oldDependencies, join(directory, 'node_modules'));
+        }
+        command('systemctl', ['daemon-reload']);
+        if (loginWasEnabled) command('systemctl', ['enable', `${name}.service`]);
+        else if (loginWasEnabledAtRuntime) command('systemctl', ['enable', '--runtime', `${name}.service`]);
+        command('systemctl', [backendWasActive ? 'restart' : 'stop', backendService]);
+        if (loginWasActive) command('systemctl', ['restart', `${name}.service`]);
+        else if (existsSync(servicePath)) command('systemctl', ['stop', `${name}.service`]);
+        rollback = 'Previous files, dependencies and service state restored';
+      } catch { rollback = 'Automatic restoration failed; restore from the Git backup'; }
+    }
+    throw new Error(`Installation failed: ${error.message}. ${rollback}. Configuration backups: ${snapshot.repo}`, { cause: error });
+  } finally {
+    // Keep old dependencies if restoration failed, for manual recovery.
+    if (!existsSync(oldDependencies)) rmSync(staging, { recursive: true, force: true });
   }
-  throw new Error(`The login service did not start. Configuration backups: ${repo}`);
 }

@@ -153,6 +153,7 @@ async function stop(child) {
     assert(signedIn.headers['strict-transport-security']);
     const sessionCookie = signedIn.headers['set-cookie'][0].split(';')[0];
     assert.equal((await request(port, '/api/info', { ...user, cookie: sessionCookie })).status, 200);
+    assert.equal((await request(port, '/api/info', { ...user, cookie: sessionCookie, extra: { connection: 'authorization, cookie, host', authorization: 'Basic attacker' } })).status, 200, 'Client connection headers cannot remove or replace gateway authentication');
     assert.equal((await request(port, '/api/info', { ip: '198.51.100.21', extra: { authorization: auth(goodPassword) } })).status, 401);
     assert.equal((await request(port, '/api/info?auth_token=anything', { ip: '198.51.100.21' })).status, 401);
     assert.equal((await request(port, '/auth/connect/test-code', { ip: '198.51.100.21' })).status, 403);

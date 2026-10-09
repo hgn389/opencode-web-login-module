@@ -3,6 +3,7 @@ import net from 'node:net';
 import { readFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { SecurityStore } from './security.mjs';
+import { readResponse } from './http-client.mjs';
 
 import { normalizeConfig } from './config.mjs';
 
@@ -21,8 +22,9 @@ export function createLoginServer(options = {}) {
     if (bits !== undefined) trustedProxies.addSubnet(ip, Number(bits), family);
     else trustedProxies.addAddress(ip, family);
   }
-  const state = new SecurityStore(config.statePath);
   const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
+  const state = new SecurityStore(config.statePath);
+  const shutdown = new AbortController();
   const csrfKey = randomBytes(32);
   const headers = {
     'cache-control': 'no-store',
@@ -73,7 +75,7 @@ export function createLoginServer(options = {}) {
   }
 
   function responseHeaders(ctx) {
-    return { ...headers, ...(ctx.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) };
+    return { ...headers, ...(ctx.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}), ...(shutdown.signal.aborted ? { connection: 'close' } : {}) };
   }
   function escapeHtml(value) { return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
   function cookies(req) {
@@ -129,22 +131,7 @@ export function createLoginServer(options = {}) {
     res.end(JSON.stringify({ message }));
   }
   function backend(path, method = 'GET', headers = {}) {
-    return new Promise((resolve, reject) => {
-      const request = http.request({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, (res) => {
-        let size = 0;
-        const chunks = [];
-        res.on('data', (chunk) => {
-          size += chunk.length;
-          if (size > 65536) res.destroy(new Error('Backend response too large'));
-          else chunks.push(chunk);
-        });
-        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));
-        res.on('error', reject);
-      });
-      request.setTimeout(10000, () => request.destroy(new Error('Backend timeout')));
-      request.on('error', reject);
-      request.end();
-    });
+    return readResponse({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, { signal: shutdown.signal });
   }
 
   async function login(req, res, ctx) {
@@ -152,12 +139,12 @@ export function createLoginServer(options = {}) {
       return page(req, res, ctx, 403, 'Phiên đăng nhập không hợp lệ. Vui lòng thử lại.');
     }
     const length = Number(req.headers['content-length'] || 0);
-    if (!Number.isFinite(length) || length > 8192) return reject(res, ctx, 413, 'Form quá lớn.');
+    if (!Number.isFinite(length) || length > 8192) return reject(res, ctx, 413, 'Dữ liệu đăng nhập quá lớn.');
     let size = 0;
     const chunks = [];
-    for await (const chunk of req) {
+    for await (const chunk of req.iterator({ destroyOnReturn: false })) {
       size += chunk.length;
-      if (size > 8192) return reject(res, ctx, 413, 'Form quá lớn.');
+      if (size > 8192) { req.resume(); return reject(res, ctx, 413, 'Dữ liệu đăng nhập quá lớn.'); }
       chunks.push(chunk);
     }
     const fields = new URLSearchParams(Buffer.concat(chunks).toString());
@@ -202,10 +189,18 @@ export function createLoginServer(options = {}) {
     } finally { state.end(ctx.ip); }
   }
 
-  function upstreamHeaders(req, ctx, session) {
-    const result = { ...req.headers, host: new URL(ctx.origin).host };
+  function endToEndHeaders(input) {
+    const result = { ...input };
+    const connection = String(input.connection || '').split(',').map((key) => key.trim().toLowerCase());
+    for (const key of [...connection, 'connection', 'keep-alive', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']) delete result[key];
+    return result;
+  }
+  function upstreamHeaders(req, ctx, session, websocket = false) {
+    const result = endToEndHeaders(req.headers);
     for (const key of ['authorization', 'proxy-authorization', 'cookie', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'forwarded', 'x-real-ip']) delete result[key];
+    result.host = new URL(ctx.origin).host;
     if (session) result.authorization = 'Basic ' + Buffer.from('opencode:' + session.token).toString('base64');
+    if (websocket) { result.connection = 'Upgrade'; result.upgrade = 'websocket'; }
     return result;
   }
   function upstreamPath(req, ctx) {
@@ -215,35 +210,45 @@ export function createLoginServer(options = {}) {
   }
   function watchSession(req, ctx, target) {
     const timer = setInterval(() => {
-      if (state.state(ctx.ip).blocked || !state.session(cookies(req)[ctx.cookie], ctx.origin, false)) target.destroy();
+      try {
+        if (state.state(ctx.ip).blocked || !state.session(cookies(req)[ctx.cookie], ctx.origin, false)) target.destroy();
+      } catch { target.destroy(); }
     }, 30000);
     timer.unref();
     target.once('close', () => clearInterval(timer));
   }
   function proxy(req, res, ctx, session) {
-    const request = http.request({ hostname: backendHost, port: backendPort, method: req.method, path: upstreamPath(req, ctx), headers: upstreamHeaders(req, ctx, session) }, (response) => {
-      const result = { ...response.headers, ...responseHeaders(ctx) };
-      if (req.url.startsWith('/_assets/') || req.url.startsWith('/icons/')) result['cache-control'] = response.headers['cache-control'] || 'public, max-age=3600';
+    const path = upstreamPath(req, ctx);
+    const request = http.request({ hostname: backendHost, port: backendPort, method: req.method, path, headers: upstreamHeaders(req, ctx, session), signal: shutdown.signal }, (response) => {
+      clearTimeout(headerTimer);
+      const result = { ...endToEndHeaders(response.headers), ...responseHeaders(ctx) };
+      if (path.startsWith('/_assets/') || path.startsWith('/icons/')) result['cache-control'] = response.headers['cache-control'] || 'public, max-age=3600';
       delete result['www-authenticate'];
       delete result['set-cookie'];
       if (session && response.statusCode === 401) {
-        state.revoke(cookies(req)[ctx.cookie]);
+        try { state.revoke(cookies(req)[ctx.cookie]); }
+        catch { response.destroy(); res.destroy(); return; }
         result['set-cookie'] = cookie(ctx, ctx.cookie, '', 0);
       }
       res.writeHead(response.statusCode, result);
       response.pipe(res);
       response.on('error', () => res.destroy());
     });
+    const headerTimer = setTimeout(() => request.destroy(new Error('Backend headers timeout')), 15000);
+    headerTimer.unref();
+    request.once('close', () => clearTimeout(headerTimer));
     request.on('error', () => {
       if (res.headersSent) return res.destroy();
       reject(res, ctx, 502, 'OpenCode tạm thời không khả dụng. Vui lòng thử lại.');
     });
     res.once('close', () => request.destroy());
+    req.once('aborted', () => request.destroy());
     if (session) watchSession(req, ctx, res);
     req.pipe(request);
   }
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer({ connectionsCheckingInterval: 1000 }, async (req, res) => {
+    req.on('error', () => res.destroy());
     let ctx;
     try { ctx = context(req); }
     catch { res.writeHead(400, headers); res.end(); return; }
@@ -285,9 +290,10 @@ export function createLoginServer(options = {}) {
       }
       if (url.pathname.startsWith('/auth/') || url.pathname === '/api/pair') return reject(res, ctx, 403, 'Đăng nhập qua trang đăng nhập.');
       const publicPath = url.pathname.startsWith('/_assets/') || url.pathname.startsWith('/icons/') || ['/site.webmanifest', '/sw.js', '/registerSW.js'].includes(url.pathname);
+      if (publicPath && !['GET', 'HEAD'].includes(req.method)) return reject(res, ctx, 405, 'Phương thức không hợp lệ.');
       const apiPath = url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname === '/openapi.json';
       if (!publicPath && !session) {
-        if (apiPath) return reject(res, ctx, 401, 'Authentication required');
+        if (apiPath) return reject(res, ctx, 401, 'Vui lòng đăng nhập.');
         return redirect(res, ctx, '/login?next=' + encodeURIComponent(safeNext(req.url, ctx)));
       }
       if (session && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin !== ctx.origin) return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
@@ -308,22 +314,31 @@ export function createLoginServer(options = {}) {
       ctx = context(req);
       const url = new URL(req.url, ctx.origin);
       session = state.session(cookies(req)[ctx.cookie], ctx.origin);
-      if (ctx.redirect || state.state(ctx.ip).blocked || !session || req.headers.origin !== ctx.origin || url.origin !== ctx.origin || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(url.pathname)) throw new Error('Unauthorized upgrade');
+      if (req.method !== 'GET' || req.headers.upgrade?.toLowerCase() !== 'websocket' || req.headers['sec-websocket-version'] !== '13' || !/^[A-Za-z0-9+/]{22}==$/.test(req.headers['sec-websocket-key'] || '') || ctx.redirect || state.state(ctx.ip).blocked || !session || req.headers.origin !== ctx.origin || url.origin !== ctx.origin || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(url.pathname)) throw new Error('Unauthorized upgrade');
     } catch {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
       return;
     }
     const upstream = net.connect(backendPort, backendHost, () => {
       const lines = [`${req.method} ${upstreamPath(req, ctx)} HTTP/${req.httpVersion}`];
-      for (const [key, value] of Object.entries(upstreamHeaders(req, ctx, session))) {
+      for (const [key, value] of Object.entries(upstreamHeaders(req, ctx, session, true))) {
         for (const entry of Array.isArray(value) ? value : [value]) if (entry !== undefined) lines.push(`${key}: ${entry}`);
       }
       upstream.write(lines.join('\r\n') + '\r\n\r\n');
       if (head.length) upstream.write(head);
       socket.pipe(upstream).pipe(socket);
     });
-    upstream.setTimeout(15000, () => { upstream.destroy(); socket.destroy(); });
-    upstream.once('data', () => upstream.setTimeout(0));
+    const handshakeTimer = setTimeout(() => { upstream.destroy(); socket.destroy(); }, 15000);
+    handshakeTimer.unref();
+    let handshake = Buffer.alloc(0);
+    const checkHandshake = (chunk) => {
+      handshake = Buffer.concat([handshake, chunk]);
+      const end = handshake.indexOf('\r\n\r\n');
+      if (end > 16384 || (end < 0 && handshake.length > 16384)) { upstream.destroy(); socket.destroy(); }
+      if (end >= 0) { clearTimeout(handshakeTimer); upstream.off('data', checkHandshake); handshake = null; }
+    };
+    upstream.on('data', checkHandshake);
+    upstream.once('close', () => clearTimeout(handshakeTimer));
     watchSession(req, ctx, socket);
     upstream.on('error', () => socket.destroy());
     socket.on('error', () => upstream.destroy());
@@ -338,9 +353,11 @@ export function createLoginServer(options = {}) {
   const sockets = new Set();
   server.on('connection', (socket) => {
     sockets.add(socket);
+    socket.on('error', () => socket.destroy());
     socket.once('close', () => sockets.delete(socket));
   });
   let closing;
+  let listening;
   let closed = false;
   return {
     server,
@@ -348,26 +365,35 @@ export function createLoginServer(options = {}) {
     async listen() {
       if (closed) throw new Error('This login server has been closed');
       if (server.listening) return server.address();
-      await new Promise((resolve, reject) => {
+      listening ??= new Promise((resolve, reject) => {
         const onError = (error) => { server.off('listening', onListening); reject(error); };
         const onListening = () => { server.off('error', onError); resolve(); };
         server.once('error', onError);
         server.once('listening', onListening);
-        server.listen(port, hostname);
+        try { server.listen(port, hostname); }
+        catch (error) { server.off('error', onError); server.off('listening', onListening); reject(error); }
       });
+      const pending = listening;
+      try { await pending; }
+      catch (error) { if (listening === pending) listening = undefined; throw error; }
+      if (closed) throw new Error('This login server has been closed');
       return server.address();
     },
     close() {
       if (closing) return closing;
       closed = true;
-      closing = new Promise((resolve) => {
-        const finish = () => { clearTimeout(timer); for (const socket of sockets) socket.destroy(); state.close(); resolve(); };
-        const timer = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 5000);
-        timer.unref();
-        if (!server.listening) { finish(); return; }
-        server.close(finish);
-        server.closeIdleConnections();
-      });
+      shutdown.abort();
+      closing = (async () => {
+        if (listening) { try { await listening; } catch {} }
+        await new Promise((resolve) => {
+          const finish = () => { clearTimeout(timer); for (const socket of sockets) socket.destroy(); state.close(); resolve(); };
+          const timer = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 5000);
+          timer.unref();
+          if (!server.listening) { finish(); return; }
+          server.close(finish);
+          server.closeIdleConnections();
+        });
+      })();
       return closing;
     },
   };

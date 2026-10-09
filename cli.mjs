@@ -1,6 +1,6 @@
-import http from 'node:http';
 import { parseArgs } from 'node:util';
 import { configFromEnv } from './config.mjs';
+import { protectedBackend } from './http-client.mjs';
 
 const usage = `OpenCode Web Login
 
@@ -17,29 +17,20 @@ Run "opencode-web-login install --help" for Linux service installation.
 `;
 
 async function doctor(config) {
-  const status = await new Promise((resolve, reject) => {
-    const request = http.get({ hostname: config.backendHost, port: config.backendPort, path: '/api/info' }, (response) => {
-      const json = (response.headers['content-type'] || '').includes('application/json');
-      response.resume();
-      response.on('end', () => resolve({ status: response.statusCode, json }));
-    });
-    request.setTimeout(3000, () => request.destroy(new Error('OpenCode backend timeout')));
-    request.on('error', reject);
-  });
-  if (status.status !== 401 || !status.json) throw new Error('Expected a password-protected OpenCode v2 backend returning JSON HTTP 401 at /api/info');
+  if (!await protectedBackend(config)) throw new Error('Expected a password-protected OpenCode v2 backend returning JSON HTTP 401 at /api/info');
   console.log(JSON.stringify({ ok: true, node: process.versions.node, gateway: config.localOrigin,
     backend: { host: config.backendHost, port: config.backendPort, protected: true }, statePath: config.statePath,
     publicOrigins: config.publicOrigins }, null, 2));
 }
 
 export async function runCLI(args = process.argv.slice(2)) {
+  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required');
   if (args[0] === 'install') {
     const { install } = await import('./install.mjs');
     return install(args.slice(1));
   }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { config: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   if (values.help || positionals[0] === 'help') { console.log(usage); return; }
-  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required');
   if (values.config) process.loadEnvFile(values.config);
   const command = positionals[0] || 'serve';
   const config = configFromEnv();
@@ -62,6 +53,7 @@ export async function runCLI(args = process.argv.slice(2)) {
   }
   if (command === 'doctor' && positionals.length === 1) return doctor(config);
   if (['blocked', 'unblock', 'revoke-sessions'].includes(command)) {
+    if (positionals.length !== (command === 'unblock' ? 2 : 1)) throw new Error('Invalid command arguments. Run opencode-web-login --help');
     const { manage } = await import('./manage.mjs');
     return manage(command, positionals[1], config.statePath);
   }

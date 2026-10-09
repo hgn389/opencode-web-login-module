@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, chmodSync } from 'node:fs';
+import { mkdirSync, chmodSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
@@ -19,6 +19,13 @@ export class SecurityStore {
       fontLoaded = true;
     }
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const parent = lstatSync(dirname(path));
+    if (!parent.isDirectory() || parent.uid !== process.getuid() || (parent.mode & 0o077)) throw new Error('The security database directory must be owned by the current user with permissions 0700');
+    for (const file of [path, path + '-wal', path + '-shm']) {
+      const info = lstatSync(file, { throwIfNoEntry: false });
+      if (!info) continue;
+      if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077)) throw new Error('Security database files must be regular files owned by the current user with permissions 0600');
+    }
     this.db = new DatabaseSync(path, { allowExtension: false });
     chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;
@@ -33,7 +40,10 @@ export class SecurityStore {
     this.requests = new Map();
     this.pending = new Set();
     this.challengeKey = randomBytes(32);
-    this.cleanup = setInterval(() => this.prune(), 60000);
+    this.cleanup = setInterval(() => {
+      try { this.prune(); }
+      catch { console.error(JSON.stringify({ event: 'security_storage_error', at: new Date().toISOString() })); }
+    }, 60000);
     this.cleanup.unref();
   }
 
