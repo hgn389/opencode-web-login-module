@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import net from 'node:net';
@@ -128,8 +129,8 @@ After=network-online.target ${backendService}
 Type=simple
 User=${name}
 Group=${name}
-WorkingDirectory=${JSON.stringify(directory)}
-EnvironmentFile=${JSON.stringify(envPath)}
+WorkingDirectory=${directory}
+EnvironmentFile=${envPath}
 StateDirectory=${name}
 StateDirectoryMode=0700
 ExecStart=${JSON.stringify(node)} ${JSON.stringify(join(directory, 'bin/opencode-web-login.mjs'))} serve
@@ -159,6 +160,12 @@ WantedBy=multi-user.target
   command('git', ['--version']);
   if (command('systemctl', ['show', backendService, '-p', 'LoadState', '--value']) !== 'loaded') throw new Error('Install and configure the existing OpenCode service first');
   await checkPort(config, name);
+  const validation = mkdtempSync(join(tmpdir(), `${name}-unit-`));
+  try {
+    const file = join(validation, `${name}.service`);
+    writeFileSync(file, unit);
+    command('systemd-analyze', ['verify', file]);
+  } finally { rmSync(validation, { recursive: true, force: true }); }
   const repo = backup(name, [...Object.keys(plan.files), ...files.map((file) => join(directory, file))]);
   let account;
   try { account = command('getent', ['passwd', name]).split(':'); }
