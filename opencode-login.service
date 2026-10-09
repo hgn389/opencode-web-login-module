@@ -6,8 +6,12 @@ After=network.target opencode.service
 
 [Service]
 Type=simple
-User=mmosh6517
+User=opencode-login
+Group=opencode-login
 WorkingDirectory=/opt/opencode-login
+EnvironmentFile=-/etc/opencode-login.env
+StateDirectory=opencode-login
+StateDirectoryMode=0700
 ExecStart=/usr/local/bin/node /opt/opencode-login/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -17,6 +21,10 @@ ProtectSystem=strict
 ProtectHome=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryMax=256M
+TasksMax=64
 UMask=0077
 
 [Install]

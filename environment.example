@@ -1,0 +1,4 @@
+# Comma-separated exact HTTPS origins. Set after the public domain is chosen.
+LOGIN_PUBLIC_ORIGINS=
+# Only proxy hosts you control may supply client IP and HTTPS headers.
+LOGIN_TRUSTED_PROXIES=127.0.0.1,::1

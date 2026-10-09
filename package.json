@@ -1,0 +1,8 @@
+{
+  "name": "opencode-web-login",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@napi-rs/canvas": "1.0.10"
+  }
+}

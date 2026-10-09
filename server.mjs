@@ -1,62 +1,137 @@
 import http from 'node:http';
 import net from 'node:net';
 import { readFileSync } from 'node:fs';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
+import { SecurityStore } from './security.mjs';
 
 const hostname = process.env.LOGIN_HOST || '192.168.1.150';
 const port = Number(process.env.LOGIN_PORT || 4096);
 const backendPort = Number(process.env.OPENCODE_BACKEND_PORT || 4097);
 const backendHost = process.env.OPENCODE_BACKEND_HOST || '127.0.0.1';
 const authority = `${hostname}:${port}`;
-const origin = `http://${authority}`;
-const sessionCookie = `opencode_session_${port}`;
-const csrfCookie = `opencode_login_csrf_${port}`;
+const lanOrigin = `http://${authority}`;
+const allowedOrigins = new Set([lanOrigin, ...(process.env.LOGIN_PUBLIC_ORIGINS || '').split(',').filter(Boolean)]);
+for (const origin of allowedOrigins) {
+  const url = new URL(origin);
+  if (url.origin !== origin || url.username || url.password || (origin !== lanOrigin && url.protocol !== 'https:')) throw new Error('Public origins must be exact HTTPS origins');
+}
+const trustedProxies = new net.BlockList();
+for (const address of (process.env.LOGIN_TRUSTED_PROXIES ?? '127.0.0.1,::1').split(',').filter(Boolean)) {
+  const [ip, bits] = address.split('/');
+  const version = net.isIP(ip);
+  if (!version) throw new Error('Invalid trusted proxy address');
+  const family = version === 4 ? 'ipv4' : 'ipv6';
+  if (bits !== undefined) trustedProxies.addSubnet(ip, Number(bits), family);
+  else trustedProxies.addAddress(ip, family);
+}
+const state = new SecurityStore(process.env.LOGIN_STATE_DB || '/var/lib/opencode-login/security.sqlite');
 const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
-const attempts = new Map();
-const interval = 10 * 60 * 1000;
-const safeHeaders = {
+const csrfKey = randomBytes(32);
+const headers = {
   'cache-control': 'no-store',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'same-origin',
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  'cross-origin-resource-policy': 'same-origin',
+  'x-robots-tag': 'noindex, nofollow',
 };
 
-function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function normalizeIP(ip) {
+  if (ip?.startsWith('::ffff:') && net.isIP(ip.slice(7)) === 4) return ip.slice(7);
+  const version = net.isIP(ip || '');
+  if (version === 4) return ip;
+  if (version === 6) return new URL(`http://[${ip}]`).hostname.slice(1, -1);
+  throw new Error('Invalid client IP');
 }
 
+function trusted(ip) { return trustedProxies.check(ip, net.isIP(ip) === 4 ? 'ipv4' : 'ipv6'); }
+
+function context(req) {
+  const peer = normalizeIP(req.socket.remoteAddress);
+  const isProxy = trusted(peer);
+  let ip = peer;
+  if (isProxy && req.headers['x-forwarded-for']) {
+    const chain = req.headers['x-forwarded-for'].split(',').map((value) => normalizeIP(value.trim()));
+    if (chain.length > 10) throw new Error('Proxy chain too long');
+    chain.push(peer);
+    while (chain.length > 1 && trusted(chain.at(-1))) chain.pop();
+    ip = chain.at(-1);
+  }
+  const secure = req.socket.encrypted === true || (isProxy && req.headers['x-forwarded-proto'] === 'https');
+  const origin = `${secure ? 'https' : 'http'}://${req.headers.host}`;
+  const httpsOrigin = `https://${req.headers.host}`;
+  if (!allowedOrigins.has(origin)) {
+    if (!secure && allowedOrigins.has(httpsOrigin)) return { redirect: httpsOrigin, ip };
+    throw new Error('Unexpected host or scheme');
+  }
+  if (secure && isProxy && !req.headers['x-forwarded-for']) throw new Error('HTTPS proxy must supply client IP');
+  return {
+    ip, origin, secure,
+    cookie: secure ? '__Host-opencode_login' : `opencode_login_${port}`,
+    csrfCookie: secure ? '__Host-opencode_csrf' : `opencode_csrf_${port}`,
+  };
+}
+
+function responseHeaders(ctx) {
+  return { ...headers, ...(ctx.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) };
+}
+function escapeHtml(value) { return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 function cookies(req) {
   return Object.fromEntries((req.headers.cookie || '').split(';').map((part) => {
     const at = part.indexOf('=');
     return at < 0 ? ['', ''] : [part.slice(0, at).trim(), part.slice(at + 1).trim()];
   }));
 }
-
-function safeNext(value) {
+function cookie(ctx, name, value, age, path = '/') {
+  return `${name}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${age}${ctx.secure ? '; Secure' : ''}`;
+}
+function safeNext(value, ctx) {
   if (!value || !value.startsWith('/') || value.startsWith('//') || /[\\\r\n]/.test(value)) return '/';
-  const url = new URL(value, origin);
-  return url.origin === origin && !['/login', '/logout'].includes(url.pathname) ? url.pathname + url.search : '/';
+  const url = new URL(value, ctx.origin);
+  return url.origin === ctx.origin && !['/login', '/logout'].includes(url.pathname) ? url.pathname + url.search : '/';
 }
-
-function page(res, status = 200, message = '', next = '/') {
-  const csrf = randomBytes(32).toString('hex');
+function csrfSignature(value, ctx) { return createHmac('sha256', csrfKey).update(value + '\0' + ctx.ip + '\0' + ctx.origin).digest('hex'); }
+function newCSRF(ctx) {
+  const value = `${Date.now()}.${randomBytes(24).toString('hex')}`;
+  return value + '.' + csrfSignature(value, ctx);
+}
+function validCSRF(token, expected, ctx) {
+  if (!/^[0-9]{13}\.[a-f0-9]{48}\.[a-f0-9]{64}$/.test(token) || token !== expected) return false;
+  const parts = token.split('.');
+  const age = Date.now() - Number(parts[0]);
+  return age >= 0 && age <= 600000 && timingSafeEqual(Buffer.from(parts[2]), Buffer.from(csrfSignature(parts.slice(0, 2).join('.'), ctx)));
+}
+function page(req, res, ctx, status = 200, message = '', next = '/') {
+  const locked = state.state(ctx.ip).blocked;
+  const csrf = newCSRF(ctx);
+  let captcha = '';
+  if (!locked && state.state(ctx.ip).failures >= 5) {
+    state.challenge(csrf, ctx.ip);
+    captcha = '<div class="captcha"><label for="captcha">Mã xác minh</label><img src="/login/captcha" width="270" height="86" alt="Mã xác minh gồm 6 ký tự trong ảnh"><input id="captcha" name="captcha" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" required aria-describedby="captcha-help"><small id="captcha-help">Nhập 6 ký tự trong ảnh. <a href="/login?next=' + encodeURIComponent(safeNext(next, ctx)) + '">Đổi mã</a></small></div>';
+  }
+  const body = template.replace('{{MESSAGE}}', escapeHtml(message)).replace('{{CSRF}}', csrf)
+    .replace('{{NEXT}}', escapeHtml(safeNext(next, ctx))).replace('{{CAPTCHA}}', captcha)
+    .replace('{{FORM_STATE}}', locked ? 'disabled' : '');
   res.writeHead(status, {
-    ...safeHeaders,
+    ...responseHeaders(ctx),
+    'content-security-policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     'content-type': 'text/html; charset=utf-8',
-    'set-cookie': `${csrfCookie}=${csrf}; Path=/login; HttpOnly; SameSite=Strict; Max-Age=600`,
+    'set-cookie': cookie(ctx, ctx.csrfCookie, csrf, 600, ctx.secure ? '/' : '/login'),
   });
-  res.end(template.replace('{{MESSAGE}}', escapeHtml(message)).replace('{{CSRF}}', csrf).replace('{{NEXT}}', escapeHtml(safeNext(next))));
+  res.end(req.method === 'HEAD' ? undefined : body);
 }
-
-function redirect(res, location, extra = {}) {
-  res.writeHead(303, { 'cache-control': 'no-store', location, ...extra });
+function redirect(res, ctx, location, extra = {}) {
+  res.writeHead(303, { ...responseHeaders(ctx), location, ...extra });
   res.end();
 }
-
+function reject(res, ctx, status, message) {
+  res.writeHead(status, { ...responseHeaders(ctx), 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ message }));
+}
 function backend(path, method = 'GET', headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, (res) => {
+    const request = http.request({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, (res) => {
       let size = 0;
       const chunks = [];
       res.on('data', (chunk) => {
@@ -67,133 +142,193 @@ function backend(path, method = 'GET', headers = {}) {
       res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));
       res.on('error', reject);
     });
-    req.setTimeout(10000, () => req.destroy(new Error('Backend timeout')));
-    req.on('error', reject);
-    req.end();
+    request.setTimeout(10000, () => request.destroy(new Error('Backend timeout')));
+    request.on('error', reject);
+    request.end();
   });
 }
 
-async function loggedIn(req) {
-  const token = cookies(req)[sessionCookie];
-  if (!token || token.length > 512) return false;
-  const check = await backend('/api/info', 'GET', { cookie: `${sessionCookie}=${token}` });
-  return check.status === 200;
-}
-
-async function login(req, res) {
-  if (req.headers.origin !== origin || req.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') {
-    return page(res, 403, 'Phiên đăng nhập không hợp lệ. Vui lòng thử lại.');
+async function login(req, res, ctx) {
+  if (req.headers.origin !== ctx.origin || req.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') {
+    return page(req, res, ctx, 403, 'Phiên đăng nhập không hợp lệ. Vui lòng thử lại.');
   }
+  const length = Number(req.headers['content-length'] || 0);
+  if (!Number.isFinite(length) || length > 8192) return reject(res, ctx, 413, 'Form quá lớn.');
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 8192) { res.writeHead(413, safeHeaders); res.end(); return; }
+    if (size > 8192) return reject(res, ctx, 413, 'Form quá lớn.');
     chunks.push(chunk);
   }
   const fields = new URLSearchParams(Buffer.concat(chunks).toString());
-  const next = safeNext(fields.get('next'));
+  const next = safeNext(fields.get('next'), ctx);
   const csrf = fields.get('csrf') || '';
-  const expected = cookies(req)[csrfCookie] || '';
-  if (!/^[a-f0-9]{64}$/.test(csrf) || !/^[a-f0-9]{64}$/.test(expected) || !timingSafeEqual(Buffer.from(csrf), Buffer.from(expected))) {
-    return page(res, 403, 'Phiên đăng nhập đã hết hạn. Vui lòng thử lại.', next);
-  }
-  const ip = req.socket.remoteAddress;
-  const now = Date.now();
-  for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
-  const rate = attempts.get(ip) || { count: 0, until: now + interval };
-  if (rate.count >= 10 || attempts.size >= 4096) {
-    res.setHeader('retry-after', String(Math.max(1, Math.ceil((rate.until - now) / 1000))));
-    return page(res, 429, 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng thử lại sau ít phút.', next);
-  }
-  rate.count += 1;
-  attempts.set(ip, rate);
-  const username = fields.get('username') || '';
-  const password = fields.get('password') || '';
-  if (!username || username.includes(':') || username.length > 128 || !password || password.length > 2048) {
-    return page(res, 422, 'Vui lòng nhập tên đăng nhập và mật khẩu hợp lệ.', next);
-  }
-  const authorization = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-  const check = await backend('/api/info', 'GET', { authorization });
-  if (check.status === 401 || check.status === 403) return page(res, 401, 'Tên đăng nhập hoặc mật khẩu không đúng.', next);
-  if (check.status !== 200) throw new Error('Backend unavailable');
-  const pairing = await backend('/api/pair', 'POST', { authorization });
-  if (pairing.status !== 200) throw new Error('Pairing unavailable');
-  const { code } = JSON.parse(pairing.body);
-  if (typeof code !== 'string' || !code) throw new Error('Invalid pairing response');
-  const session = await backend(`/auth/connect/${encodeURIComponent(code)}`, 'GET', { accept: 'application/json' });
-  if (session.status !== 200) throw new Error('Session unavailable');
-  const { token } = JSON.parse(session.body);
-  if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
-  attempts.delete(ip);
-  redirect(res, next, { 'set-cookie': [
-    `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`,
-    `${csrfCookie}=; Path=/login; HttpOnly; SameSite=Strict; Max-Age=0`,
-  ] });
+  if (!validCSRF(csrf, cookies(req)[ctx.csrfCookie], ctx)) return page(req, res, ctx, 403, 'Phiên đăng nhập đã hết hạn. Vui lòng thử lại.', next);
+  if (!state.begin(ctx.ip)) return page(req, res, ctx, 429, 'Yêu cầu trước đang được xử lý. Vui lòng thử lại.', next);
+  try {
+    const account = state.state(ctx.ip);
+    if (account.blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.', next);
+    if (account.failures >= 5 && !state.verifyChallenge(csrf, ctx.ip, (fields.get('captcha') || '').trim().toUpperCase())) {
+      return page(req, res, ctx, 422, 'Mã xác minh không đúng hoặc đã hết hạn. Vui lòng nhập mã mới.', next);
+    }
+    const username = fields.get('username') || '';
+    const password = fields.get('password') || '';
+    let check;
+    if (!username || username.includes(':') || username.length > 128 || !password || password.length > 2048) check = { status: 401 };
+    else {
+      const authorization = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+      check = await backend('/api/info', 'GET', { authorization });
+    }
+    if (check.status === 401 || check.status === 403) {
+      const result = state.fail(ctx.ip);
+      const message = result.blocked ? 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.'
+        : `Tên đăng nhập hoặc mật khẩu không đúng. Đã sai ${result.failures}/10 lần.${result.failures >= 5 ? ' Vui lòng nhập mã xác minh.' : ''}`;
+      return page(req, res, ctx, result.blocked ? 403 : 401, message, next);
+    }
+    if (check.status !== 200) throw new Error('Backend unavailable');
+    const authorization = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+    const pairing = await backend('/api/pair', 'POST', { authorization });
+    if (pairing.status !== 200) throw new Error('Pairing unavailable');
+    const { code } = JSON.parse(pairing.body);
+    if (typeof code !== 'string' || !code) throw new Error('Invalid pairing response');
+    const session = await backend(`/auth/connect/${encodeURIComponent(code)}`, 'GET', { accept: 'application/json' });
+    if (session.status !== 200) throw new Error('Session unavailable');
+    const { token } = JSON.parse(session.body);
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
+    state.revoke(cookies(req)[ctx.cookie]);
+    const value = state.createSession(token, ctx.origin);
+    state.succeed(ctx.ip);
+    redirect(res, ctx, next, { 'set-cookie': [cookie(ctx, ctx.cookie, value, 28800), cookie(ctx, ctx.csrfCookie, '', 0, ctx.secure ? '/' : '/login')] });
+  } finally { state.end(ctx.ip); }
 }
 
-function proxy(req, res) {
-  const headers = { ...req.headers, host: authority };
-  delete headers['proxy-authorization'];
-  const upstream = http.request({ hostname: backendHost, port: backendPort, method: req.method, path: req.url, headers }, (response) => {
-    const headers = { ...response.headers };
-    delete headers['www-authenticate'];
-    res.writeHead(response.statusCode, headers);
+function upstreamHeaders(req, ctx, session) {
+  const result = { ...req.headers, host: new URL(ctx.origin).host };
+  for (const key of ['authorization', 'proxy-authorization', 'cookie', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'forwarded', 'x-real-ip']) delete result[key];
+  if (session) result.authorization = 'Basic ' + Buffer.from('opencode:' + session.token).toString('base64');
+  return result;
+}
+function upstreamPath(req, ctx) {
+  const url = new URL(req.url, ctx.origin);
+  url.searchParams.delete('auth_token');
+  return url.pathname + url.search;
+}
+function watchSession(req, ctx, target) {
+  const timer = setInterval(() => {
+    if (state.state(ctx.ip).blocked || !state.session(cookies(req)[ctx.cookie], ctx.origin, false)) target.destroy();
+  }, 30000);
+  timer.unref();
+  target.once('close', () => clearInterval(timer));
+}
+function proxy(req, res, ctx, session) {
+  const request = http.request({ hostname: backendHost, port: backendPort, method: req.method, path: upstreamPath(req, ctx), headers: upstreamHeaders(req, ctx, session) }, (response) => {
+    const result = { ...response.headers, ...responseHeaders(ctx) };
+    if (req.url.startsWith('/_assets/') || req.url.startsWith('/icons/')) result['cache-control'] = response.headers['cache-control'] || 'public, max-age=3600';
+    delete result['www-authenticate'];
+    delete result['set-cookie'];
+    if (session && response.statusCode === 401) {
+      state.revoke(cookies(req)[ctx.cookie]);
+      result['set-cookie'] = cookie(ctx, ctx.cookie, '', 0);
+    }
+    res.writeHead(response.statusCode, result);
     response.pipe(res);
     response.on('error', () => res.destroy());
   });
-  upstream.on('error', () => {
+  request.on('error', () => {
     if (res.headersSent) return res.destroy();
-    res.writeHead(502, { ...safeHeaders, 'content-type': 'text/plain; charset=utf-8' });
-    res.end('OpenCode tạm thời không khả dụng. Vui lòng thử lại.');
+    reject(res, ctx, 502, 'OpenCode tạm thời không khả dụng. Vui lòng thử lại.');
   });
-  res.on('close', () => upstream.destroy());
-  req.pipe(upstream);
+  res.once('close', () => request.destroy());
+  if (session) watchSession(req, ctx, res);
+  req.pipe(request);
 }
 
 const server = http.createServer(async (req, res) => {
+  let ctx;
+  try { ctx = context(req); }
+  catch { res.writeHead(400, headers); res.end(); return; }
+  if (ctx.redirect) {
+    if (req.method === 'GET' || req.method === 'HEAD') { res.writeHead(308, { ...headers, location: ctx.redirect + (req.url.startsWith('/') && !req.url.startsWith('//') ? req.url : '/') }); res.end(); }
+    else { res.writeHead(400, headers); res.end(); }
+    return;
+  }
   try {
-    if (req.headers.host !== authority) { res.writeHead(400); res.end(); return; }
-    const url = new URL(req.url, origin);
-    if (url.pathname === '/login') {
-      if (req.method === 'POST') return await login(req, res);
-      if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { allow: 'GET, HEAD, POST' }); res.end(); return; }
-      if (await loggedIn(req)) return redirect(res, safeNext(url.searchParams.get('next')));
-      return page(res, 200, '', url.searchParams.get('next'));
+    const url = new URL(req.url, ctx.origin);
+    if (url.origin !== ctx.origin) return reject(res, ctx, 400, 'Yêu cầu không hợp lệ.');
+    if (state.state(ctx.ip).blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.');
+    const session = state.session(cookies(req)[ctx.cookie], ctx.origin);
+    if (url.pathname === '/login' || url.pathname === '/login/captcha') {
+      if (!state.allowRequest(ctx.ip)) { res.setHeader('retry-after', '60'); return reject(res, ctx, 429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.'); }
+      if (url.pathname === '/login/captcha') {
+        if (req.method !== 'GET') return reject(res, ctx, 405, 'Phương thức không hợp lệ.');
+        const image = state.image(cookies(req)[ctx.csrfCookie], ctx.ip);
+        if (!image) return reject(res, ctx, 404, 'Mã xác minh đã hết hạn.');
+        res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'image/png', 'content-length': image.length });
+        res.end(image);
+        return;
+      }
+      if (req.method === 'POST') return await login(req, res, ctx);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return reject(res, ctx, 405, 'Phương thức không hợp lệ.');
+      if (session) return redirect(res, ctx, safeNext(url.searchParams.get('next'), ctx));
+      return page(req, res, ctx, 200, '', url.searchParams.get('next'));
     }
     if (url.pathname === '/logout') {
-      if (req.method !== 'POST' || req.headers.origin !== origin) { res.writeHead(403, safeHeaders); res.end(); return; }
-      return redirect(res, '/login', { 'set-cookie': `${sessionCookie}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` });
+      if (!session) return redirect(res, ctx, '/login');
+      if (req.method !== 'POST' || req.headers.origin !== ctx.origin) return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
+      state.revoke(cookies(req)[ctx.cookie]);
+      return redirect(res, ctx, '/login', { 'set-cookie': cookie(ctx, ctx.cookie, '', 0) });
     }
+    if (url.pathname.startsWith('/auth/') || url.pathname === '/api/pair') return reject(res, ctx, 403, 'Đăng nhập qua trang đăng nhập.');
     const publicPath = url.pathname.startsWith('/_assets/') || url.pathname.startsWith('/icons/') || ['/site.webmanifest', '/sw.js', '/registerSW.js'].includes(url.pathname);
-    const apiPath = url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/openapi.json';
-    if (!publicPath && !apiPath && !(await loggedIn(req))) return redirect(res, '/login?next=' + encodeURIComponent(safeNext(req.url)));
-    proxy(req, res);
+    const apiPath = url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname === '/openapi.json';
+    if (!publicPath && !session) {
+      if (apiPath) return reject(res, ctx, 401, 'Authentication required');
+      return redirect(res, ctx, '/login?next=' + encodeURIComponent(safeNext(req.url, ctx)));
+    }
+    if (session && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin !== ctx.origin) return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
+    proxy(req, res, ctx, session);
   } catch {
     if (res.headersSent) return res.destroy();
-    page(res, 503, 'OpenCode đang khởi động hoặc tạm thời không khả dụng. Vui lòng thử lại.');
+    page(req, res, ctx, 503, 'OpenCode đang khởi động hoặc tạm thời không khả dụng. Vui lòng thử lại.');
   }
 });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.headers.host !== authority || (req.headers.origin && req.headers.origin !== origin)) { socket.destroy(); return; }
+  let ctx, session;
+  try {
+    ctx = context(req);
+    const url = new URL(req.url, ctx.origin);
+    session = state.session(cookies(req)[ctx.cookie], ctx.origin);
+    if (ctx.redirect || state.state(ctx.ip).blocked || !session || req.headers.origin !== ctx.origin || url.origin !== ctx.origin || !/^\/api\/(?:pty|experimental\/persistent-pty)\/[^/]+\/connect$/.test(url.pathname)) throw new Error('Unauthorized upgrade');
+  } catch {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    return;
+  }
   const upstream = net.connect(backendPort, backendHost, () => {
-    const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (key === 'proxy-authorization') continue;
+    const lines = [`${req.method} ${upstreamPath(req, ctx)} HTTP/${req.httpVersion}`];
+    for (const [key, value] of Object.entries(upstreamHeaders(req, ctx, session))) {
       for (const entry of Array.isArray(value) ? value : [value]) if (entry !== undefined) lines.push(`${key}: ${entry}`);
     }
     upstream.write(lines.join('\r\n') + '\r\n\r\n');
     if (head.length) upstream.write(head);
     socket.pipe(upstream).pipe(socket);
   });
+  upstream.setTimeout(15000, () => { upstream.destroy(); socket.destroy(); });
+  upstream.once('data', () => upstream.setTimeout(0));
+  watchSession(req, ctx, socket);
   upstream.on('error', () => socket.destroy());
   socket.on('error', () => upstream.destroy());
   socket.on('close', () => upstream.destroy());
   upstream.on('close', () => socket.destroy());
 });
 server.headersTimeout = 15000;
-server.requestTimeout = 30000;
-server.maxHeadersCount = 100;
-server.listen(port, hostname, () => console.log(`OpenCode web sign-in listening on ${origin}`));
-for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { server.close(); setTimeout(() => process.exit(0), 5000).unref(); });
+server.requestTimeout = 15000;
+server.keepAliveTimeout = 5000;
+server.maxHeadersCount = 60;
+server.maxConnections = 256;
+server.listen(port, hostname, () => console.log(`OpenCode web sign-in listening on ${lanOrigin}`));
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
+  server.close(() => { state.close(); process.exit(0); });
+  setTimeout(() => { state.close(); process.exit(0); }, 5000).unref();
+});
