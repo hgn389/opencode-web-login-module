@@ -161,6 +161,8 @@ export class SecurityStore {
     if (value) this.db.prepare('DELETE FROM sessions WHERE id = ?').run(hash(value));
   }
 
+  revokeAll() { this.db.prepare('DELETE FROM sessions').run(); }
+
   prune() {
     const now = Date.now();
     for (const [key, row] of this.challenges) if (row.expires <= now) this.challenges.delete(key);

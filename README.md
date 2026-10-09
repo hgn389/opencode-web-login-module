@@ -6,6 +6,8 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Bản thử nghiệm:** [v.1.0.0 beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.0.0-beta). Phiên bản gói: `1.0.0-beta`.
 
+**Nhánh `main` có thêm menu đổi mật khẩu và cập nhật qua web. Các tính năng này chưa nằm trong gói beta đã phát hành; cài từ `main` theo hướng dẫn dưới đây để sử dụng.**
+
 ## Cài đặt và cấu hình
 
 ### 1. Chuẩn bị OpenCode và công cụ cần thiết
@@ -32,13 +34,13 @@ Ghi lại đường dẫn binary từ `command -v opencode` và tên dịch vụ
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone --branch v1.0.0-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch main https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
 sudo npm ci --omit=dev
 node bin/opencode-web-login.mjs --help
 ```
 
-Lệnh clone trên lấy đúng bản beta đã phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy mã mới nhất ở `main`, có thể có thay đổi chưa phát hành. Nếu muốn đúng bản beta đã phát hành, thay `--branch main` bằng `--branch v1.0.0-beta`; bản này chưa có menu quản trị mới. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
 
 #### Cài từ gói `.tgz` trên GitHub Release
 
@@ -87,13 +89,14 @@ Bộ cài sẽ:
 4. Tạo người dùng hệ thống riêng `opencode-login`, không có shell đăng nhập.
 5. Chuyển OpenCode sang địa chỉ nội bộ `127.0.0.1:4097`, đặt gateway đăng nhập ở địa chỉ/cổng bạn chọn.
 6. Khởi động dịch vụ và kiểm tra cả trang đăng nhập lẫn backend có yêu cầu mật khẩu.
+7. Cài dịch vụ quản trị riêng `opencode-login-admin.service`, giao tiếp với gateway qua Unix socket riêng; gateway vẫn chạy bằng người dùng không có quyền root. Tự động cập nhật mặc định tắt.
 
 Module không cài hoặc cập nhật OpenCode. Bộ cài giữ cơ sở dữ liệu phiên và khóa IP khi cài lại. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ cũ, đồng thời báo vị trí sao lưu Git.
 
 ### 4. Kiểm tra và đăng nhập
 
 ```sh
-sudo systemctl status opencode.service opencode-login.service
+sudo systemctl status opencode.service opencode-login.service opencode-login-admin.service
 sudo node /opt/opencode-login/bin/opencode-web-login.mjs doctor --config /etc/opencode-login.env
 ```
 
@@ -105,6 +108,23 @@ Mở một trong các địa chỉ phù hợp với `--host` đã cấu hình:
 Nhập tài khoản/mật khẩu OpenCode. Khi đăng nhập thành công, trình duyệt chuyển vào OpenCode. Trang đăng xuất nằm ở `/logout`.
 
 Nếu trình duyệt đang giữ trang đăng nhập cũ, nhấn `Ctrl+F5` rồi thử lại. Nếu trang báo chưa gửi cookie, cho phép cookie cho địa chỉ này. Lỗi phiên hoặc CAPTCHA không được tính là nhập sai tài khoản/mật khẩu.
+
+#### Đổi mật khẩu và cập nhật qua web
+
+Sau khi đăng nhập, mở **Cài đặt** của OpenCode. Nhóm **Web Login Module** có hai mục:
+
+- **Đổi mật khẩu:** nhập mật khẩu hiện tại, mật khẩu mới từ 16 đến 128 ký tự, xác nhận lại và đánh dấu đã lưu công việc. Module sao lưu cấu hình bằng Git, đổi mật khẩu thật của OpenCode và khởi động lại dịch vụ. Mọi phiên đăng nhập bị thu hồi; đăng nhập lại bằng mật khẩu mới. Nếu khởi động thất bại, module khôi phục cấu hình trước đó.
+- **Cập nhật Web Login Module:** kiểm tra bản mới, chọn kênh **Bản ổn định** hoặc **Bản ổn định và beta**, bật/tắt tự động cập nhật hoặc bấm **Cập nhật ngay**. Lưu cấu hình và cài bản mới đều yêu cầu mật khẩu hiện tại. Cập nhật thủ công yêu cầu xác nhận đã lưu công việc; tự động cập nhật cũng sẽ khởi động lại dịch vụ khi có bản mới.
+
+Trên điện thoại, hai nút xuất hiện ngay dưới thanh điều hướng Cài đặt. Nếu bản OpenCode khác đã đổi cấu trúc menu, mở trực tiếp `/web-login/password` hoặc `/web-login/updates` trên cùng địa chỉ gateway. Chưa đăng nhập sẽ không truy cập được các chức năng này.
+
+Menu được tích hợp bằng script do gateway phục vụ trên cùng origin, không sửa tệp OpenCode. Bản OpenCode hiện tại chỉ nạp các trang cài đặt GUI tích hợp sẵn, chưa nạp renderer của extension bên ngoài; vì vậy đây là phần tích hợp của Web Login Module, không phải plugin GUI chính thức. Tích hợp menu áp dụng cho giao diện truy cập qua gateway.
+
+**Mặc định:** cập nhật thủ công, kênh bản ổn định. Khi bật tự động, dịch vụ kiểm tra mỗi giờ. Bộ cập nhật chỉ nhận phiên bản cao hơn từ GitHub Release đã công bố của `hgn389/opencode-web-login-module`, xác minh SHA-256 theo GitHub API, kiểm tra nội dung gói và thư viện đã khóa, rồi gọi bộ cài có sao lưu và khôi phục. Không tải mã từ `main`, không hạ phiên bản, không cập nhật OpenCode và không tạo bản phát hành trên GitHub. Bản beta hiện tại sẽ không bị tải xuống cài đè lên chính nó.
+
+Yêu cầu giả mạo origin/CSRF bị từ chối. Nhập sai mật khẩu xác nhận cũng tính vào bộ đếm IP: đến 5 lần sẽ yêu cầu đăng nhập lại với CAPTCHA, đến 10 lần khóa IP. Mật khẩu mới không được ghi vào log hoặc repository công khai.
+
+Nếu đang dùng bản module cũ, lấy `main` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
 
 ### 5. Thay đổi cấu hình sau khi cài
 
@@ -119,8 +139,13 @@ Tệp cấu hình dịch vụ là `/etc/opencode-login.env`. Dữ liệu bảo m
 | `LOGIN_STATE_DB` | `~/.local/state/opencode-web-login/security.sqlite` khi chạy độc lập |
 | `LOGIN_PUBLIC_ORIGINS` | Rỗng; danh sách domain HTTPS phân cách bằng dấu phẩy |
 | `LOGIN_TRUSTED_PROXIES` | `127.0.0.1,::1`; chỉ IP/CIDR của proxy do bạn kiểm soát |
+| `LOGIN_ADMIN_SOCKET` | Rỗng khi chạy độc lập; bộ cài đặt `/run/NAME-admin/control.sock` |
 
 CLI `--config` đọc file env. Biến môi trường đã có sẵn được ưu tiên hơn file. Bộ cài Linux đặt `LOGIN_STATE_DB` rõ ràng tại `/var/lib/NAME/security.sqlite`.
+
+Cấu hình quản trị root: `/etc/NAME-admin.json` (`0600`). Tùy chọn cập nhật và trạng thái tác vụ: `/var/lib/NAME-admin/` (`0700`). Sau lần đổi mật khẩu đầu tiên, mật khẩu đang dùng được lưu riêng tại `/etc/NAME-backend-password.env` (`0600`), nạp qua drop-in `90-web-login-password.conf`; bộ cài giữ các tệp này khi cài lại. Không chia sẻ chúng hoặc đưa lên GitHub. Bản sao lưu Git riêng trên máy chủ cũng có thể chứa mật khẩu, cần giữ quyền `0700`.
+
+Khi sửa địa chỉ, cổng, domain hoặc proxy trong `/etc/NAME.env`, chạy lại bộ cài với tùy chọn mới để đồng bộ cấu hình quản trị trước khi dùng cập nhật qua web. Nếu chỉ chỉnh env rồi khởi động gateway, bộ cập nhật vẫn dùng cấu hình cài đặt lần trước.
 
 Sau khi chỉnh cấu hình gateway, khởi động lại dịch vụ:
 

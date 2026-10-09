@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { SecurityStore } from './security.mjs';
 import { readResponse } from './http-client.mjs';
+import { adminCall } from './admin-client.mjs';
 
 import { normalizeConfig } from './config.mjs';
 
@@ -24,6 +25,8 @@ export function createLoginServer(options = {}) {
   }
   const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
   const loginScript = readFileSync(new URL('./login-client.js', import.meta.url), 'utf8');
+  const adminPage = readFileSync(new URL('./admin.html', import.meta.url), 'utf8');
+  const adminAssets = new Map(['admin-ui.js', 'settings-hook.js', 'settings-hook.css'].map(file => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const state = new SecurityStore(config.statePath);
   const shutdown = new AbortController();
   const csrfKey = state.csrfKey;
@@ -243,7 +246,13 @@ export function createLoginServer(options = {}) {
   }
   function proxy(req, res, ctx, session) {
     const path = upstreamPath(req, ctx);
-    const request = http.request({ hostname: backendHost, port: backendPort, method: req.method, path, headers: upstreamHeaders(req, ctx, session), signal: shutdown.signal }, (response) => {
+    const navigation = session && req.method === 'GET' && !path.startsWith('/api/') && req.headers.accept?.includes('text/html');
+    const requestHeaders = upstreamHeaders(req, ctx, session);
+    if (navigation) {
+      requestHeaders['accept-encoding'] = 'identity';
+      delete requestHeaders['if-none-match']; delete requestHeaders['if-modified-since'];
+    }
+    const request = http.request({ hostname: backendHost, port: backendPort, method: req.method, path, headers: requestHeaders, signal: shutdown.signal }, async (response) => {
       clearTimeout(headerTimer);
       const result = { ...endToEndHeaders(response.headers), ...responseHeaders(ctx) };
       if (path.startsWith('/_assets/') || path.startsWith('/icons/')) result['cache-control'] = response.headers['cache-control'] || 'public, max-age=3600';
@@ -253,6 +262,26 @@ export function createLoginServer(options = {}) {
         try { state.revoke(cookies(req)[ctx.cookie]); }
         catch { response.destroy(); res.destroy(); return; }
         result['set-cookie'] = cookie(ctx, ctx.cookie, '', 0);
+      }
+      if (navigation && response.statusCode === 200 && response.headers['content-type']?.includes('text/html') && !response.headers['content-encoding']) {
+        const timer = setTimeout(() => response.destroy(new Error('HTML response timeout')), 15000);
+        timer.unref();
+        try {
+          let size = 0;
+          const chunks = [];
+          for await (const chunk of response) {
+            size += chunk.length;
+            if (size > 1024 * 1024) throw new Error('HTML response too large');
+            chunks.push(chunk);
+          }
+          const html = Buffer.concat(chunks).toString();
+          const hook = '<link rel="stylesheet" href="/web-login/settings-hook.css"><script src="/web-login/settings-hook.js" defer></script>';
+          const body = html.includes('</head>') ? html.replace('</head>', hook + '</head>') : html + hook;
+          for (const key of ['content-length', 'etag', 'content-md5', 'digest']) delete result[key];
+          res.writeHead(200, result); res.end(body);
+        } catch { if (!res.headersSent) reject(res, ctx, 502, 'Không tải được giao diện OpenCode. Vui lòng thử lại.'); else res.destroy(); }
+        finally { clearTimeout(timer); }
+        return;
       }
       res.writeHead(response.statusCode, result);
       response.pipe(res);
@@ -269,6 +298,67 @@ export function createLoginServer(options = {}) {
     req.once('aborted', () => request.destroy());
     if (session) watchSession(req, ctx, res);
     req.pipe(request);
+  }
+
+  function adminCSRF(ctx, session, value = `${Date.now()}.${randomBytes(24).toString('hex')}`) {
+    return value + '.' + createHmac('sha256', csrfKey).update('admin\0' + session.id + '\0' + value + '\0' + ctx.ip + '\0' + ctx.origin).digest('hex');
+  }
+  async function administration(req, res, ctx, session, url) {
+    const send = (status, data) => { res.writeHead(status, { ...responseHeaders(ctx), 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
+    if (!session) return send(401, { message: 'Vui lòng đăng nhập lại.', loginRequired: true });
+    const asset = adminAssets.get(url.pathname.slice('/web-login/'.length));
+    if (asset !== undefined && ['GET', 'HEAD'].includes(req.method)) {
+      res.writeHead(200, { ...responseHeaders(ctx), 'content-type': url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8' });
+      res.end(req.method === 'HEAD' ? undefined : asset); return;
+    }
+    if (['/web-login/password', '/web-login/updates'].includes(url.pathname) && ['GET', 'HEAD'].includes(req.method)) {
+      res.writeHead(200, { ...responseHeaders(ctx), 'x-frame-options': 'SAMEORIGIN', 'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'" });
+      res.end(req.method === 'HEAD' ? undefined : adminPage); return;
+    }
+    const operation = url.pathname.slice('/web-login/api/'.length);
+    if (!url.pathname.startsWith('/web-login/api/') || !['status', 'check', 'password', 'preferences', 'update'].includes(operation)) return send(404, { message: 'Không tìm thấy trang.' });
+    if (!state.allowRequest(ctx.ip, 'admin', 60)) return send(429, { message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.' });
+    if (req.headers['x-opencode-login'] !== '1' || req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== ctx.origin)) return send(403, { message: 'Yêu cầu không hợp lệ.' });
+    if (operation === 'status') {
+      if (req.method !== 'GET') return send(405, { message: 'Phương thức không hợp lệ.' });
+      if (!config.adminSocket) return send(200, { available: false, message: 'Chưa bật dịch vụ quản trị. Cài lại bằng bộ cài Linux để sử dụng.', csrf: adminCSRF(ctx, session) });
+      const result = await adminCall(config.adminSocket, 'status');
+      return send(result.status, { ...result, csrf: adminCSRF(ctx, session) });
+    }
+    const token = req.headers['x-web-login-csrf'];
+    const parts = typeof token === 'string' ? token.split('.') : [];
+    const age = Date.now() - Number(parts[0]);
+    if (req.method !== 'POST' || req.headers.origin !== ctx.origin || req.headers['content-type']?.split(';')[0] !== 'application/json' || !/^\d{13}\.[a-f0-9]{48}\.[a-f0-9]{64}$/.test(token || '') || age < 0 || age > 600000 || !timingSafeEqual(Buffer.from(token), Buffer.from(adminCSRF(ctx, session, parts.slice(0, 2).join('.'))))) return send(403, { message: 'Phiên xác nhận không hợp lệ. Vui lòng tải lại trang.' });
+    if (operation !== 'check' && state.state(ctx.ip).failures >= 5) {
+      state.revoke(cookies(req)[ctx.cookie]);
+      return send(401, { message: 'Vui lòng đăng nhập lại và nhập mã xác minh trước khi tiếp tục.', loginRequired: true });
+    }
+    if (!config.adminSocket) return send(503, { message: 'Chưa bật dịch vụ quản trị.' });
+    if (!state.begin(ctx.ip)) return send(429, { message: 'Yêu cầu trước đang được xử lý. Vui lòng chờ.' });
+    try {
+      let size = 0;
+      const chunks = [];
+      for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+        size += chunk.length;
+        if (size > 8192) { req.resume(); return send(413, { message: 'Dữ liệu quá lớn.' }); }
+        chunks.push(chunk);
+      }
+      let fields;
+      try { fields = JSON.parse(Buffer.concat(chunks).toString()); }
+      catch { return send(400, { message: 'Dữ liệu không hợp lệ.' }); }
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return send(400, { message: 'Dữ liệu không hợp lệ.' });
+      const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
+      const result = await adminCall(config.adminSocket, operation, picked);
+      console.log(JSON.stringify({ event: 'web_admin_request', operation, ip: ctx.ip, status: result.status, at: new Date().toISOString() }));
+      if (result.status === 401) {
+        const failed = state.fail(ctx.ip);
+        if (failed.failures >= 5) { state.revoke(cookies(req)[ctx.cookie]); result.loginRequired = true; }
+      }
+      else if ([200, 202].includes(result.status) && operation !== 'check') state.succeed(ctx.ip);
+      if (result.status === 202 && operation === 'password') state.revokeAll();
+      return send(result.status, result);
+    } finally { state.end(ctx.ip); }
   }
 
   const server = http.createServer({ connectionsCheckingInterval: 1000 }, async (req, res) => {
@@ -303,6 +393,7 @@ export function createLoginServer(options = {}) {
       }
       if (state.state(ctx.ip).blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.');
       const session = state.session(cookies(req)[ctx.cookie], ctx.origin);
+      if (url.pathname.startsWith('/web-login/')) return await administration(req, res, ctx, session, url);
       if (url.pathname === '/login' || url.pathname === '/login/captcha') {
         if (!state.allowRequest(ctx.ip)) { res.setHeader('retry-after', '60'); return reject(res, ctx, 429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.'); }
         if (url.pathname === '/login/captcha') {
@@ -341,6 +432,7 @@ export function createLoginServer(options = {}) {
       proxy(req, res, ctx, session);
     } catch {
       if (res.headersSent) return res.destroy();
+      if (req.url.startsWith('/web-login/')) return reject(res, ctx, 503, 'Dịch vụ quản trị tạm thời không khả dụng. Vui lòng thử lại.');
       try {
         page(req, res, ctx, 503, 'OpenCode đang khởi động hoặc tạm thời không khả dụng. Vui lòng thử lại.');
       } catch {

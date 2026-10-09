@@ -24,6 +24,8 @@ export function normalizeConfig(input = {}) {
   if ((host === backendHost || ['0.0.0.0', '::'].includes(host)) && listenPort === backendPort) throw new Error('Gateway and backend ports must be different');
   const statePath = input.statePath ?? defaultStatePath();
   if (typeof statePath !== 'string' || statePath.includes('\0') || !isAbsolute(statePath)) throw new Error('statePath must be an absolute filename');
+  const adminSocket = input.adminSocket || undefined;
+  if (adminSocket !== undefined && (typeof adminSocket !== 'string' || !isAbsolute(adminSocket) || /[\x00-\x1f]/.test(adminSocket))) throw new Error('adminSocket must be an absolute Unix socket path');
   const publicOrigins = input.publicOrigins ?? [];
   const trustedProxies = input.trustedProxies ?? ['127.0.0.1', '::1'];
   if (!Array.isArray(publicOrigins) || !Array.isArray(trustedProxies)) throw new Error('publicOrigins and trustedProxies must be arrays');
@@ -39,7 +41,7 @@ export function normalizeConfig(input = {}) {
     const version = isIP(parts[0]);
     if (!version || parts.length > 2 || (parts.length === 2 && (!/^\d+$/.test(parts[1]) || Number(parts[1]) > (version === 4 ? 32 : 128)))) throw new Error('Invalid trusted proxy address or CIDR');
   }
-  return Object.freeze({ host, port: listenPort, backendHost, backendPort, statePath: resolve(statePath), authority, localOrigin,
+  return Object.freeze({ host, port: listenPort, backendHost, backendPort, statePath: resolve(statePath), adminSocket, authority, localOrigin,
     publicOrigins: Object.freeze([...publicOrigins]), trustedProxies: Object.freeze([...trustedProxies]) });
 }
 
@@ -51,6 +53,7 @@ export function configFromEnv(env = process.env) {
     backendHost: env.OPENCODE_BACKEND_HOST,
     backendPort: env.OPENCODE_BACKEND_PORT,
     statePath: env.LOGIN_STATE_DB,
+    adminSocket: env.LOGIN_ADMIN_SOCKET,
     publicOrigins: env.LOGIN_PUBLIC_ORIGINS === undefined ? undefined : list(env.LOGIN_PUBLIC_ORIGINS),
     trustedProxies: env.LOGIN_TRUSTED_PROXIES === undefined ? undefined : list(env.LOGIN_TRUSTED_PROXIES),
   });

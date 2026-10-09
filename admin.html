@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cài đặt Web Login Module · OpenCode</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#25252a;--muted:#64646c;--border:#dedee4;--field:#f7f7f9;--accent:#29292e}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif}main{width:min(100%,720px);margin:auto;padding:32px 28px}h1{font-size:24px;line-height:1.3;margin:12px 0}h2{font-size:18px}p{color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:24px}a{color:inherit;text-underline-offset:3px}form{display:grid;gap:18px;margin-top:24px}label{display:block;font-weight:600}input[type=password],select{display:block;width:100%;font:inherit;margin-top:6px;border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--fg);padding:11px 12px}label.check{display:flex;align-items:flex-start;gap:10px}input[type=checkbox]{margin:6px 0;width:17px;height:17px;flex-shrink:0}button{font:inherit;font-weight:600;border:1px solid var(--border);background:var(--field);color:var(--fg);padding:10px 18px;border-radius:8px;cursor:pointer}button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}button:disabled{opacity:.55;cursor:wait}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #537cca;outline-offset:3px}.actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.note{font-size:13px;margin:6px 0 0}.status{white-space:pre-wrap;overflow-wrap:anywhere;border-left:3px solid var(--border);padding:12px 16px;background:var(--field);margin:20px 0}.status:empty{display:none}section[hidden]{display:none}.info{display:grid;grid-template-columns:auto 1fr;gap:8px 20px;margin:24px 0}.info dt{color:var(--muted)}.info dd{margin:0;overflow-wrap:anywhere}footer{border-top:1px solid var(--border);margin-top:28px;padding-top:16px;font-size:13px;color:var(--muted)}@media(prefers-color-scheme:dark){:root{--bg:#1c1c20;--fg:#efeff2;--muted:#a9a9b4;--border:#3a3a42;--field:#24242a;--accent:#efeff2}}@media(max-width:540px){main{padding:20px 16px}h1{font-size:21px}.info{grid-template-columns:1fr;gap:2px}.info dd{margin-bottom:10px}.actions button{flex:1}nav{font-size:13px}}
+</style>
+<script src="/web-login/admin-ui.js" defer></script>
+</head>
+<body><main>
+<nav aria-label="Cài đặt Web Login Module"><a href="/web-login/password">Đổi mật khẩu</a><a href="/web-login/updates">Cập nhật Web Login Module</a></nav>
+<div id="notice" class="status" role="status" aria-live="polite"></div>
+<section id="password-page" hidden>
+<h1>Đổi mật khẩu</h1>
+<p>Đổi mật khẩu tài khoản OpenCode đang dùng. Mọi phiên đăng nhập sẽ bị thu hồi và OpenCode sẽ khởi động lại, ngắt các kết nối đang mở.</p>
+<form id="password-form">
+<label>Mật khẩu hiện tại<input name="password" type="password" autocomplete="current-password" maxlength="2048" required></label>
+<label>Mật khẩu mới<input name="newPassword" type="password" autocomplete="new-password" minlength="16" maxlength="128" required aria-describedby="password-help"></label>
+<p id="password-help" class="note">Dùng từ 16 đến 128 ký tự. Bạn có thể dùng một cụm từ dài, riêng biệt cho tài khoản này.</p>
+<label>Xác nhận mật khẩu mới<input name="confirmPassword" type="password" autocomplete="new-password" minlength="16" maxlength="128" required></label>
+<label class="check"><input name="acknowledge" type="checkbox" required><span>Tôi đã lưu công việc và đồng ý khởi động lại OpenCode.</span></label>
+<div class="actions"><button class="primary" type="submit">Đổi mật khẩu</button></div>
+</form>
+</section>
+<section id="updates-page" hidden>
+<h1>Cập nhật Web Login Module</h1>
+<p>Cập nhật từ bản phát hành của <a href="https://github.com/hgn389/opencode-web-login-module/releases" target="_blank" rel="noopener noreferrer">repository chính thức</a>. Cấu hình đăng nhập và dữ liệu khóa IP được giữ lại.</p>
+<dl class="info"><dt>Phiên bản đang cài</dt><dd id="version">Đang tải…</dd><dt>Bản mới</dt><dd id="release">Chưa kiểm tra</dd><dt>Lần kiểm tra gần nhất</dt><dd id="checked">Chưa kiểm tra</dd></dl>
+<div class="actions"><button id="check-update" type="button">Kiểm tra cập nhật</button></div>
+<form id="update-form">
+<label class="check"><input name="automatic" type="checkbox"><span>Tự động cài bản mới khi kiểm tra hằng giờ</span></label>
+<p class="note">Mặc định tắt. Khi bật, dịch vụ sẽ tự sao lưu và cập nhật; OpenCode có thể ngắt kết nối lúc khởi động lại.</p>
+<label>Kênh cập nhật<select name="channel"><option value="stable">Bản ổn định</option><option value="beta">Bản ổn định và beta</option></select></label>
+<label>Mật khẩu hiện tại để xác nhận<input name="password" type="password" autocomplete="current-password" maxlength="2048" required></label>
+<div class="actions"><button type="submit" name="save" class="primary">Lưu cấu hình</button><button type="submit" name="install" disabled>Cập nhật ngay</button></div>
+<label class="check"><input name="acknowledge" type="checkbox"><span>Tôi đã lưu công việc và đồng ý khởi động lại khi cập nhật ngay.</span></label>
+</form>
+<div id="job" class="status" role="status" aria-live="polite"></div>
+</section>
+<footer><a href="/" target="_top">Quay lại OpenCode</a> · <a href="/logout" target="_top">Đăng xuất</a></footer>
+</main></body></html>

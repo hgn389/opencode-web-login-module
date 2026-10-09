@@ -14,7 +14,8 @@
   },
   "files": [
     "index.mjs", "config.mjs", "security.mjs", "http-client.mjs", "cli.mjs", "server.mjs", "manage.mjs",
-    "install.mjs", "login.html", "login-client.js", "bin/", "assets/", "environment.example", "npm-shrinkwrap.json"
+    "install.mjs", "login.html", "login-client.js", "admin-client.mjs", "admin-service.mjs", "update.mjs",
+    "admin.html", "admin-ui.js", "settings-hook.js", "settings-hook.css", "bin/", "assets/", "environment.example", "npm-shrinkwrap.json"
   ],
   "dependencies": {
     "@napi-rs/canvas": "1.0.10"

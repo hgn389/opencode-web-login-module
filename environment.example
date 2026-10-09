@@ -10,3 +10,5 @@ OPENCODE_BACKEND_PORT=4097
 LOGIN_PUBLIC_ORIGINS=
 # Trust only reverse proxies you control. Supports exact IPs and CIDRs.
 LOGIN_TRUSTED_PROXIES=127.0.0.1,::1
+# Optional standalone web administration; configured by the Linux installer.
+# LOGIN_ADMIN_SOCKET=/run/opencode-login-admin/control.sock
