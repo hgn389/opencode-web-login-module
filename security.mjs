@@ -2,16 +2,22 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 const IDLE_TTL = 30 * 60 * 1000;
 const CHALLENGE_TTL = 5 * 60 * 1000;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
-GlobalFonts.registerFromPath('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 'LoginFont');
+let fontLoaded = false;
 
 export class SecurityStore {
   constructor(path) {
+    if (!fontLoaded) {
+      const font = fileURLToPath(new URL('./assets/DejaVuSans-Bold.ttf', import.meta.url));
+      if (!GlobalFonts.registerFromPath(font, 'LoginFont')) throw new Error('Unable to load the bundled verification font');
+      fontLoaded = true;
+    }
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path, { allowExtension: false });
     chmodSync(path, 0o600);

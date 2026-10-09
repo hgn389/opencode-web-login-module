@@ -1,4 +1,12 @@
-# Comma-separated exact HTTPS origins. Set after the public domain is chosen.
+# Default: access on this machine only. Set the LAN IP explicitly when needed.
+LOGIN_HOST=127.0.0.1
+LOGIN_PORT=4096
+OPENCODE_BACKEND_HOST=127.0.0.1
+OPENCODE_BACKEND_PORT=4097
+# Standalone default is ~/.local/state/opencode-web-login/security.sqlite.
+# The Linux installer uses /var/lib/SERVICE_NAME/security.sqlite instead.
+# LOGIN_STATE_DB=/absolute/path/security.sqlite
+# Comma-separated exact HTTPS origins, with no trailing slash.
 LOGIN_PUBLIC_ORIGINS=
-# Only proxy hosts you control may supply client IP and HTTPS headers.
+# Trust only reverse proxies you control. Supports exact IPs and CIDRs.
 LOGIN_TRUSTED_PROXIES=127.0.0.1,::1

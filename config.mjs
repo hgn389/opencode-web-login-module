@@ -1,0 +1,55 @@
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
+import { isIP } from 'node:net';
+
+export function defaultStatePath() {
+  return join(homedir(), '.local', 'state', 'opencode-web-login', 'security.sqlite');
+}
+
+function port(value, name) {
+  const result = Number(value);
+  if (!Number.isInteger(result) || result < 1 || result > 65535) throw new Error(`${name} must be an integer between 1 and 65535`);
+  return result;
+}
+
+export function normalizeConfig(input = {}) {
+  const host = input.host ?? '127.0.0.1';
+  if (!isIP(host)) throw new Error('host must be an IPv4 or IPv6 listen address');
+  const listenPort = port(input.port ?? 4096, 'port');
+  const backendHost = input.backendHost ?? '127.0.0.1';
+  if (!['127.0.0.1', '::1'].includes(backendHost)) throw new Error('The OpenCode backend must listen on loopback');
+  const backendPort = port(input.backendPort ?? 4097, 'backendPort');
+  if ((host === backendHost || ['0.0.0.0', '::'].includes(host)) && listenPort === backendPort) throw new Error('Gateway and backend ports must be different');
+  const statePath = input.statePath ?? defaultStatePath();
+  if (typeof statePath !== 'string' || !isAbsolute(statePath)) throw new Error('statePath must be an absolute filename');
+  const publicOrigins = input.publicOrigins ?? [];
+  const trustedProxies = input.trustedProxies ?? ['127.0.0.1', '::1'];
+  if (!Array.isArray(publicOrigins) || !Array.isArray(trustedProxies)) throw new Error('publicOrigins and trustedProxies must be arrays');
+  const authority = `${isIP(host) === 6 ? `[${host}]` : host}:${listenPort}`;
+  const localOrigin = `http://${authority}`;
+  for (const origin of publicOrigins) {
+    const url = new URL(origin);
+    if (url.origin !== origin || url.username || url.password || url.protocol !== 'https:') throw new Error('publicOrigins must contain exact HTTPS origins');
+  }
+  for (const address of trustedProxies) {
+    if (typeof address !== 'string') throw new Error('Invalid trusted proxy address');
+    const parts = address.split('/');
+    const version = isIP(parts[0]);
+    if (!version || parts.length > 2 || (parts.length === 2 && (!/^\d+$/.test(parts[1]) || Number(parts[1]) > (version === 4 ? 32 : 128)))) throw new Error('Invalid trusted proxy address or CIDR');
+  }
+  return Object.freeze({ host, port: listenPort, backendHost, backendPort, statePath: resolve(statePath), authority, localOrigin,
+    publicOrigins: Object.freeze([...publicOrigins]), trustedProxies: Object.freeze([...trustedProxies]) });
+}
+
+export function configFromEnv(env = process.env) {
+  const list = (value) => value.split(',').map((part) => part.trim()).filter(Boolean);
+  return normalizeConfig({
+    host: env.LOGIN_HOST,
+    port: env.LOGIN_PORT,
+    backendHost: env.OPENCODE_BACKEND_HOST,
+    backendPort: env.OPENCODE_BACKEND_PORT,
+    statePath: env.LOGIN_STATE_DB,
+    publicOrigins: env.LOGIN_PUBLIC_ORIGINS === undefined ? undefined : list(env.LOGIN_PUBLIC_ORIGINS),
+    trustedProxies: env.LOGIN_TRUSTED_PROXIES === undefined ? undefined : list(env.LOGIN_TRUSTED_PROXIES),
+  });
+}

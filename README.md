@@ -1,86 +1,158 @@
-# OpenCode web login
+# OpenCode Web Login 1.0.0
 
-Login: `http://192.168.1.150:4096/login`.
-Logout confirmation: `http://192.168.1.150:4096/logout`.
-Use the existing OpenCode username (`opencode`) and password.
+Module đăng nhập và bảo mật độc lập cho OpenCode v2. Có thể dùng như thư viện Node.js, chạy bằng CLI hoặc cài thành dịch vụ Linux. Module kết nối với OpenCode qua HTTP API, không cần sửa hay build lại mã nguồn OpenCode.
 
-## Login protection
+Yêu cầu: Node.js 24 trở lên; OpenCode v2 hỗ trợ `/api/info`, `/api/pair`, `/auth/connect/:code`; backend OpenCode phải chạy ở loopback và có mật khẩu. Bản v1 dùng API khác nên chưa được hỗ trợ. Mật khẩu vẫn do dịch vụ OpenCode quản lý.
 
-- Failed credentials are counted per client IP, across service restarts.
-- The fifth failure displays an image verification challenge. Further credential checks require a correct challenge.
-- The tenth credential failure permanently blocks the IP until an administrator unblocks it.
-- Incorrect verification answers do not consume credential attempts. They are limited by a separate request throttle.
-- Successful login before blocking resets consecutive credential failures.
-- Challenges expire after five minutes and are consumed after one submission. Their answers are never included in HTML or image metadata.
-- Up to 40 login page, form and challenge requests per IP per minute are allowed. Only one credential check per IP may be in progress.
+## Các quy tắc bảo mật
 
-IPs shared by several people also share their failure counter and lockout. A blocked IP cannot access protected APIs or terminal connections. This is an application block, not a firewall ban; it does not affect other websites.
+- Sai user/password 5 lần: hiện CAPTCHA ảnh; những lần tiếp theo phải giải đúng CAPTCHA.
+- Sai user/password 10 lần: khóa IP vĩnh viễn đến khi quản trị viên mở khóa.
+- Đăng nhập đúng trước khi bị khóa đặt lại bộ đếm lỗi liên tiếp.
+- Bộ đếm và khóa IP lưu trong SQLite, giữ qua các lần khởi động lại.
+- CAPTCHA tồn tại 5 phút, dùng một lần; sai CAPTCHA không tăng bộ đếm user/password.
+- Tối đa 40 yêu cầu vào trang/form/CAPTCHA mỗi IP mỗi phút; mỗi IP chỉ kiểm tra một mật khẩu tại một thời điểm.
+- Phiên tối đa 8 giờ, hết hạn sau 30 phút không hoạt động; đăng xuất thu hồi phiên ở máy chủ.
+- Chặn việc né trang đăng nhập qua Basic Auth, token URL, cookie native hoặc link pairing.
+- Bảo vệ CSRF, kiểm tra origin và proxy đáng tin cậy; vẫn hỗ trợ SSE và terminal WebSocket.
+- Khi chạy qua domain HTTPS: cookie `__Host-`, Secure, HttpOnly, SameSite=Strict và HSTS.
 
-## Sessions and isolation
+IP dùng chung cũng dùng chung bộ đếm và khóa. Khóa này chỉ áp dụng tại gateway OpenCode, không chặn các website khác. Các luồng SSE/WebSocket kiểm tra lại phiên mỗi 30 giây. CAPTCHA ảnh là lớp giảm bot; khi mở Internet nên bổ sung MFA hoặc dịch vụ kiểm tra bot chuyên dụng.
 
-The gateway listens on `192.168.1.150:4096`. OpenCode remains private at `127.0.0.1:4097`.
+## Cài gói trên máy khác
 
-Only opaque gateway session cookies are accepted publicly. Basic credentials, native OpenCode cookies, pairing links and `auth_token` parameters cannot bypass the login form. The gateway passes the native session token to the private backend. It never stores account passwords.
-
-Sessions expire after eight hours, or 30 minutes without activity. Logout immediately revokes the session in the database. Existing streams and WebSockets recheck session validity every 30 seconds. A rejected native token revokes the gateway session, including after an OpenCode password change.
-
-The login service runs as the dedicated `opencode-login` system user with no shell and no access to home directories. State is in `/var/lib/opencode-login/security.sqlite`, with directory permissions `0700` and database permissions `0600`. Do not put this database, its WAL files or any environment secrets in Git.
-
-Login failures, successful logins and new IP blocks are logged in the service journal. Passwords, challenge answers and session tokens are excluded from logs.
-
-## Administration
+Sao chép file `opencode-web-login-1.0.0.tgz` sang máy cần sử dụng. Cài Node.js 24+, Git và một dịch vụ OpenCode v2 có mật khẩu trước.
 
 ```sh
-systemctl status opencode opencode-login
+npm install -g ./opencode-web-login-1.0.0.tgz
+opencode-web-login --help
+```
+
+Gói được phân phối bằng file, chưa được đưa lên npm registry. Nếu cài global vào thư mục hệ thống, chạy lệnh npm với quyền quản trị phù hợp.
+
+### Chạy độc lập
+
+```sh
+# OpenCode dùng tài khoản/mật khẩu đã được cấu hình của bạn.
+opencode serve --hostname 127.0.0.1 --port 4097
+```
+
+Ở terminal khác, tạo cấu hình từ `environment.example`, rồi chạy:
+
+```sh
+opencode-web-login serve --config /absolute/path/login.env
+```
+
+Mặc định gateway chỉ nghe ở `127.0.0.1:4096`. Mở `http://127.0.0.1:4096/login`. Muốn truy cập LAN, đặt `LOGIN_HOST` thành IP LAN thật và cho phép cổng tương ứng trong firewall của bạn. Module không tự mở firewall.
+
+Trang đăng xuất: `/logout`. API/CLI của OpenCode trên máy chủ kết nối trực tiếp với backend loopback; gateway bên ngoài chỉ nhận phiên tạo qua trang đăng nhập.
+
+### Cài dịch vụ Linux
+
+Thay đường dẫn binary OpenCode, tên dịch vụ và địa chỉ bên dưới theo máy đích. Không dùng backend công khai.
+
+```sh
+sudo opencode-web-login install \
+  --opencode-bin /usr/local/bin/opencode \
+  --opencode-service opencode.service \
+  --host 127.0.0.1 \
+  --port 4096 \
+  --backend-port 4097 \
+  --dry-run
+```
+
+`--dry-run` in ra cấu hình đầy đủ để kiểm tra, không thay đổi hệ thống. Bỏ `--dry-run` để cài. Các tùy chọn thêm:
+
+```sh
+opencode-web-login install --help
+```
+
+Installer sẽ:
+
+1. Kiểm tra cấu hình, backend service, executable và cổng đang sử dụng.
+2. Sao lưu những file sẽ thay đổi bằng Git tại `/var/lib/NAME-install-backup`, quyền `0700`.
+3. Cài mã nguồn và dependency theo `npm-shrinkwrap.json`.
+4. Tạo user riêng không có shell; dữ liệu nằm ở `/var/lib/NAME/security.sqlite`.
+5. Sinh file `/etc/NAME.env`, unit `NAME.service` và override backend để chỉ nghe loopback.
+6. Khởi động lại backend, bật gateway và kiểm tra trang đăng nhập.
+
+Mặc định `NAME=opencode-login`, thư mục mã nguồn `/opt/opencode-login`. Dùng `--name` và `--install-dir` để đổi. Mỗi instance cần cổng, service backend và nơi lưu dữ liệu riêng. Khi cài lại, truyền đúng các tùy chọn cũ; installer giữ database, nhưng ghi lại cấu hình từ các tùy chọn bạn truyền.
+
+Installer không đổi DNS, TLS hoặc firewall, và không cài/cập nhật OpenCode. Nếu cài thất bại, vị trí backup được báo để khôi phục các file cấu hình. Không dùng thư mục home cho mã nguồn dịch vụ vì unit chặn quyền truy cập home.
+
+## Dùng như thư viện
+
+```js
+import { createLoginServer } from 'opencode-web-login';
+
+const login = createLoginServer({
+  host: '127.0.0.1',
+  port: 4096,
+  backendHost: '127.0.0.1',
+  backendPort: 4097,
+  statePath: '/absolute/path/security.sqlite',
+  publicOrigins: ['https://coding.example.com'],
+  trustedProxies: ['127.0.0.1', '::1'],
+});
+
+await login.listen();
+// Khi ứng dụng chủ cần dừng:
+await login.close();
+```
+
+Import module không mở cổng, tạo database hoặc đăng ký signal handler. Mỗi instance có store, phiên và bộ đếm riêng. Hàm `close()` không thoát tiến trình của ứng dụng chủ. `login.server` là HTTP server nếu cần gắn thêm event; `login.config` là cấu hình đã kiểm tra.
+
+Có thể lấy cấu hình từ biến môi trường bằng `configFromEnv()` hoặc kiểm tra cấu hình bằng `normalizeConfig()`. Gateway và backend phải có endpoint khác nhau; backend chỉ được dùng địa chỉ loopback. Font CAPTCHA được đóng gói cùng module, không phụ thuộc đường dẫn font trên máy đích.
+
+## Cấu hình
+
+| Biến | Giá trị mặc định |
+| --- | --- |
+| `LOGIN_HOST` | `127.0.0.1` |
+| `LOGIN_PORT` | `4096` |
+| `OPENCODE_BACKEND_HOST` | `127.0.0.1` |
+| `OPENCODE_BACKEND_PORT` | `4097` |
+| `LOGIN_STATE_DB` | `~/.local/state/opencode-web-login/security.sqlite` khi chạy độc lập |
+| `LOGIN_PUBLIC_ORIGINS` | Rỗng; danh sách domain HTTPS phân cách bằng dấu phẩy |
+| `LOGIN_TRUSTED_PROXIES` | `127.0.0.1,::1`; chỉ IP/CIDR của proxy do bạn kiểm soát |
+
+CLI `--config` đọc file env. Biến môi trường đã có sẵn được ưu tiên hơn file. Linux installer đặt `LOGIN_STATE_DB` rõ ràng tại `/var/lib/NAME/security.sqlite`.
+
+## Quản trị
+
+```sh
+opencode-web-login doctor --config /etc/opencode-login.env
+
+# Đọc/mở khóa database dưới đúng user sở hữu.
+sudo -u opencode-login opencode-web-login blocked --config /etc/opencode-login.env
+sudo -u opencode-login opencode-web-login unblock 192.0.2.10 --config /etc/opencode-login.env
+sudo -u opencode-login opencode-web-login revoke-sessions --config /etc/opencode-login.env
+
+systemctl status opencode-login
 journalctl -u opencode-login --since today
-
-# List blocked IPs.
-runuser -u opencode-login -- /usr/local/bin/node --no-warnings /opt/opencode-login/manage.mjs blocked
-
-# Replace the address below with the IP to unblock.
-runuser -u opencode-login -- /usr/local/bin/node --no-warnings /opt/opencode-login/manage.mjs unblock 192.168.1.100
-
-# Revoke all browser sessions.
-runuser -u opencode-login -- /usr/local/bin/node --no-warnings /opt/opencode-login/manage.mjs revoke-sessions
 ```
 
-Unblocking takes effect immediately. It does not require restarting the service.
+`doctor` kiểm tra cấu hình và backend có phản hồi JSON yêu cầu xác thực. Nó không thử mật khẩu và không chứng minh mọi API của các phiên bản OpenCode tương lai đều tương thích.
 
-Restarting `opencode` also restarts `opencode-login`. Both services are enabled at boot.
+Database chỉ cho user dịch vụ đọc, thư mục `0700`, file `0600`. Không đưa database, WAL hoặc các file env chứa bí mật vào Git hay gói cài đặt. Nhật ký không ghi mật khẩu, đáp án CAPTCHA hoặc session token. Đổi mật khẩu OpenCode khiến native token cũ bị từ chối; gateway thu hồi phiên bị backend từ chối.
 
-## Public HTTPS deployment
+## Domain HTTPS
 
-The public domain has not been configured. The firewall still limits direct access to port 4096 to the LAN. Keep the application ports private; expose the HTTPS reverse proxy on port 443.
+Cấu hình chứng chỉ TLS trên reverse proxy, rồi thêm domain bằng `LOGIN_PUBLIC_ORIGINS=https://coding.example.com` hoặc tùy chọn installer `--public-origins`.
 
-1. Configure the chosen domain and a valid TLS certificate on the reverse proxy.
-2. Set `LOGIN_PUBLIC_ORIGINS=https://chosen-domain.example` in `/etc/opencode-login.env`.
-3. Set `LOGIN_TRUSTED_PROXIES` to the exact proxy IP addresses or networks you control. The default trusts only `127.0.0.1` and `::1`. A local proxy connecting to the LAN address may use `192.168.1.150` as its source; configure that exact address only after checking it.
-4. Preserve the public Host header. The TLS proxy must send `X-Forwarded-Proto: https` and append the real client address to `X-Forwarded-For`. Strip client-supplied forwarding headers at the first trusted edge. If using Cloudflare or another upstream proxy, verify its address ranges and forwarding behavior before adding any trust.
-5. Proxy HTTP requests and WebSocket upgrades to `192.168.1.150:4096`. Redirect public HTTP to HTTPS.
-6. Restart `opencode-login` and verify HTTPS, real client IPs, challenges, lockouts, and terminal connections from outside the LAN.
+Proxy phải giữ public Host, gửi `X-Forwarded-Proto: https` và chuỗi `X-Forwarded-For` chứa IP thật. Proxy đầu tiên phải xử lý header giả do client gửi. Chỉ thêm địa chỉ proxy đã kiểm tra vào `LOGIN_TRUSTED_PROXIES`. Nếu có Cloudflare/proxy nhiều tầng, kiểm tra dải IP và cách chuyển tiếp trước khi thêm trust.
 
-Configured public HTTPS origins use `__Host-` cookies with Secure, HttpOnly and SameSite=Strict attributes, plus HSTS. Public plaintext HTTP requests redirect to HTTPS; plaintext form submissions are rejected. Forwarded headers from untrusted peers are ignored. HTTPS proxy requests without a client IP header are rejected.
+Cấu hình WebSocket upgrade, chuyển HTTP sang HTTPS và chỉ công khai cổng proxy HTTPS. Domain HTTP sẽ được chuyển sang HTTPS; gửi form qua HTTP bị từ chối. Kiểm tra IP thật và khóa IP từ bên ngoài LAN trước khi đưa vào sử dụng.
 
-For additional protection against distributed attacks and image recognition, use an identity gateway with MFA and a managed bot challenge. These require the chosen domain and the corresponding service configuration.
+## Phát triển và đóng gói
 
-## Validation and backups
+Tại thư mục source có test:
 
 ```sh
-cd /opt/opencode-login
-node --no-warnings --test test/security.test.mjs
+npm ci
+npm test
+mkdir -p dist
+npm pack --pack-destination dist
 ```
 
-Tests use a separate temporary database and deterministic verification answers only inside isolated test processes. Production has no verification bypass or test endpoint.
-
-Source changes are saved in this Git repository. Original service and firewall configurations are backed up in the private repository `/root/opencode-network-config`. The installed service is `/etc/systemd/system/opencode-login.service`; the backend override is `/etc/systemd/system/opencode.service.d/web-login.conf`.
-
-## Restore direct LAN access
-
-```sh
-systemctl disable --now opencode-login
-rm /etc/systemd/system/opencode.service.d/web-login.conf
-systemctl daemon-reload
-systemctl restart opencode
-```
-
-This restores direct OpenCode access at `192.168.1.150:4096` and bypasses the gateway protection. Use this only to restore LAN access; do not use the direct service as an Internet endpoint.
+Test dùng database tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Production không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Gói cài chỉ chứa source, giao diện, font, license font và dependency lock; không chứa cấu hình máy đang chạy, database hay lịch sử Git.

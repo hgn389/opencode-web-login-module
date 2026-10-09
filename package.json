@@ -1,7 +1,21 @@
 {
   "name": "opencode-web-login",
+  "version": "1.0.0",
+  "description": "Reusable login and security gateway for OpenCode v2",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
+  "engines": { "node": ">=24" },
+  "exports": { ".": "./index.mjs", "./config": "./config.mjs" },
+  "bin": { "opencode-web-login": "./bin/opencode-web-login.mjs" },
+  "scripts": {
+    "start": "node bin/opencode-web-login.mjs serve",
+    "test": "node --no-warnings --test test/*.test.mjs"
+  },
+  "files": [
+    "index.mjs", "config.mjs", "security.mjs", "cli.mjs", "server.mjs", "manage.mjs",
+    "install.mjs", "login.html", "bin/", "assets/", "environment.example", "npm-shrinkwrap.json"
+  ],
   "dependencies": {
     "@napi-rs/canvas": "1.0.10"
   }
