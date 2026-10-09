@@ -59,8 +59,10 @@ function context(req) {
     ip = chain.at(-1);
   }
   const secure = req.socket.encrypted === true || (isProxy && req.headers['x-forwarded-proto'] === 'https');
-  const origin = `${secure ? 'https' : 'http'}://${req.headers.host}`;
-  const httpsOrigin = `https://${req.headers.host}`;
+  const hostURL = new URL(`${secure ? 'https' : 'http'}://${req.headers.host}`);
+  if (hostURL.username || hostURL.password || hostURL.pathname !== '/' || hostURL.search || hostURL.hash) throw new Error('Invalid host');
+  const origin = hostURL.origin;
+  const httpsOrigin = new URL(`https://${req.headers.host}`).origin;
   if (!allowedOrigins.has(origin)) {
     if (!secure && allowedOrigins.has(httpsOrigin)) return { redirect: httpsOrigin, ip };
     throw new Error('Unexpected host or scheme');
@@ -275,6 +277,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/logout') {
       if (!session) return redirect(res, ctx, '/login');
+      if (req.method === 'GET') {
+        res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'" });
+        res.end('<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Đăng xuất · OpenCode</title><style>body{font:16px/1.5 system-ui;margin:0;min-height:100dvh;display:grid;place-items:center;background:#f4f4f5;color:#222;padding:24px;box-sizing:border-box}main{max-width:380px}button{font:inherit;padding:12px 24px;border:0;border-radius:8px;background:#222;color:#fff;cursor:pointer}a{display:inline-block;margin-top:20px;color:#555}</style><main><h1>Đăng xuất</h1><p>Kết thúc phiên đăng nhập trên thiết bị này?</p><form method="post" action="/logout"><button type="submit">Đăng xuất</button></form><a href="/">Quay lại OpenCode</a></main></html>');
+        return;
+      }
       if (req.method !== 'POST' || req.headers.origin !== ctx.origin) return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
       state.revoke(cookies(req)[ctx.cookie]);
       return redirect(res, ctx, '/login', { 'set-cookie': cookie(ctx, ctx.cookie, '', 0) });
@@ -290,7 +297,11 @@ const server = http.createServer(async (req, res) => {
     proxy(req, res, ctx, session);
   } catch {
     if (res.headersSent) return res.destroy();
-    page(req, res, ctx, 503, 'OpenCode đang khởi động hoặc tạm thời không khả dụng. Vui lòng thử lại.');
+    try {
+      page(req, res, ctx, 503, 'OpenCode đang khởi động hoặc tạm thời không khả dụng. Vui lòng thử lại.');
+    } catch {
+      reject(res, ctx, 503, 'OpenCode tạm thời không khả dụng. Vui lòng thử lại.');
+    }
   }
 });
 
