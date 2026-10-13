@@ -162,11 +162,11 @@ export function createLoginServer(options = {}) {
   function backend(path, method = 'GET', headers = {}) {
     return readResponse({ hostname: backendHost, port: backendPort, path, method, headers: { host: authority, ...headers } }, { signal: shutdown.signal });
   }
-  async function changingPassword() {
+  async function administrationBusy() {
     if (!config.adminSocket) return false;
     const result = await adminCall(config.adminSocket, 'status', {}, { signal: shutdown.signal });
     if (result.status !== 200) throw new Error('Administration unavailable');
-    return result.job?.type === 'password' && ['starting', 'running'].includes(result.job.phase);
+    return result.job?.recoveryRequired === true || ['password', 'opencode-update'].includes(result.job?.type) && ['starting', 'running'].includes(result.job.phase);
   }
 
   async function login(req, res, ctx) {
@@ -196,7 +196,7 @@ export function createLoginServer(options = {}) {
     if (!state.begin(ctx.ip)) return page(req, res, ctx, 429, 'Yêu cầu trước đang được xử lý. Vui lòng thử lại.', next);
     try {
       const revision = state.sessionRevision();
-      if (await changingPassword()) return page(req, res, ctx, 503, 'Đang đổi mật khẩu và khởi động lại OpenCode. Vui lòng chờ rồi đăng nhập lại.', next);
+      if (await administrationBusy()) return page(req, res, ctx, 503, 'OpenCode đang xử lý tác vụ quản trị hoặc cần khôi phục. Vui lòng chờ rồi đăng nhập lại.', next);
       const account = state.state(ctx.ip);
       if (account.blocked) return page(req, res, ctx, 403, 'IP này đã bị khóa do đăng nhập sai 10 lần. Vui lòng liên hệ quản trị viên.', next);
       if (account.failures >= 5 && !state.verifyChallenge(csrf, ctx.ip, (fields.get('captcha') || '').trim().toUpperCase())) {
@@ -226,7 +226,7 @@ export function createLoginServer(options = {}) {
       if (session.status !== 200) throw new Error('Session unavailable');
       const { token } = JSON.parse(session.body);
       if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
-      if (await changingPassword()) return page(req, res, ctx, 503, 'Đang đổi mật khẩu và khởi động lại OpenCode. Vui lòng chờ rồi đăng nhập lại.', next);
+      if (await administrationBusy()) return page(req, res, ctx, 503, 'OpenCode đang xử lý tác vụ quản trị hoặc cần khôi phục. Vui lòng chờ rồi đăng nhập lại.', next);
       state.revoke(cookies(req)[ctx.cookie]);
       const value = state.createSession(token, ctx.origin, revision);
       if (!value) return page(req, res, ctx, 409, 'Phiên đã bị thu hồi trong lúc đăng nhập. Vui lòng thử lại.', next);
@@ -339,26 +339,26 @@ export function createLoginServer(options = {}) {
       res.writeHead(200, { ...responseHeaders(ctx), 'content-type': url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8' });
       res.end(req.method === 'HEAD' ? undefined : asset); return;
     }
-    if (['/web-login/password', '/web-login/updates'].includes(url.pathname) && ['GET', 'HEAD'].includes(req.method)) {
+    if (['/web-login/password', '/web-login/updates', '/web-login/opencode'].includes(url.pathname) && ['GET', 'HEAD'].includes(req.method)) {
       res.writeHead(200, { ...responseHeaders(ctx), 'x-frame-options': 'SAMEORIGIN', 'content-type': 'text/html; charset=utf-8',
         'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'" });
       res.end(req.method === 'HEAD' ? undefined : adminPage); return;
     }
     const operation = url.pathname.slice('/web-login/api/'.length);
-    if (!url.pathname.startsWith('/web-login/api/') || !['status', 'check', 'password', 'preferences', 'update'].includes(operation)) return send(404, { message: 'Không tìm thấy trang.' });
+    if (!url.pathname.startsWith('/web-login/api/') || !['status', 'check', 'password', 'preferences', 'update', 'opencode-status', 'opencode-check', 'opencode-update'].includes(operation)) return send(404, { message: 'Không tìm thấy trang.' });
     if (!state.allowRequest(ctx.ip, 'admin', 60)) return send(429, { message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.' });
     if (req.headers['x-opencode-login'] !== '1' || req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== ctx.origin)) return send(403, { message: 'Yêu cầu không hợp lệ.' });
-    if (operation === 'status') {
+    if (['status', 'opencode-status'].includes(operation)) {
       if (req.method !== 'GET') return send(405, { message: 'Phương thức không hợp lệ.' });
       if (!config.adminSocket) return send(200, { available: false, message: 'Chưa bật dịch vụ quản trị. Cài lại bằng bộ cài Linux để sử dụng.', csrf: adminCSRF(ctx, session) });
-      const result = await adminCall(config.adminSocket, 'status', {}, { signal: shutdown.signal });
+      const result = await adminCall(config.adminSocket, operation, {}, { signal: shutdown.signal });
       return send(result.status, { ...result, csrf: adminCSRF(ctx, session) });
     }
     const token = req.headers['x-web-login-csrf'];
     const parts = typeof token === 'string' ? token.split('.') : [];
     const age = Date.now() - Number(parts[0]);
     if (req.method !== 'POST' || req.headers.origin !== ctx.origin || req.headers['content-type']?.split(';')[0] !== 'application/json' || !/^\d{13}\.[a-f0-9]{48}\.[a-f0-9]{64}$/.test(token || '') || age < 0 || age > 600000 || !timingSafeEqual(Buffer.from(token), Buffer.from(adminCSRF(ctx, session, parts.slice(0, 2).join('.'))))) return send(403, { message: 'Phiên xác nhận không hợp lệ. Vui lòng tải lại trang.' });
-    if (operation !== 'check' && state.state(ctx.ip).failures >= 5) {
+    if (!['check', 'opencode-check'].includes(operation) && state.state(ctx.ip).failures >= 5) {
       state.revoke(cookies(req)[ctx.cookie]);
       return send(401, { message: 'Vui lòng đăng nhập lại và nhập mã xác minh trước khi tiếp tục.', loginRequired: true });
     }
@@ -376,14 +376,14 @@ export function createLoginServer(options = {}) {
       try { fields = JSON.parse(Buffer.concat(chunks).toString()); }
       catch { return send(400, { message: 'Dữ liệu không hợp lệ.' }); }
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return send(400, { message: 'Dữ liệu không hợp lệ.' });
-      const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
+      const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel', 'acknowledge'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
       const result = await adminCall(config.adminSocket, operation, picked, { signal: shutdown.signal });
       console.log(JSON.stringify({ event: 'web_admin_request', operation, ip: ctx.ip, status: result.status, at: new Date().toISOString() }));
       if (result.status === 401) {
         const failed = state.fail(ctx.ip);
         if (failed.failures >= 5) { state.revoke(cookies(req)[ctx.cookie]); result.loginRequired = true; }
       }
-      else if ([200, 202].includes(result.status) && operation !== 'check') state.succeed(ctx.ip);
+      else if ([200, 202].includes(result.status) && !['check', 'opencode-check'].includes(operation)) state.succeed(ctx.ip);
       if (result.status === 202 && operation === 'password') state.revokeAll();
       return send(result.status, result);
     } finally { state.end(ctx.ip); }

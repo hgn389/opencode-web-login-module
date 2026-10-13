@@ -9,7 +9,7 @@
 <script src="/web-login/admin-ui.js" defer></script>
 </head>
 <body><main>
-<nav aria-label="Cài đặt Web Login Module"><a href="/web-login/password">Đổi mật khẩu</a><a href="/web-login/updates">Cập nhật Web Login Module</a></nav>
+<nav aria-label="Cài đặt Web Login Module"><a href="/web-login/password">Đổi mật khẩu</a><a href="/web-login/updates">Cập nhật Web Login Module</a><a href="/web-login/opencode">Cập nhật OpenCode</a></nav>
 <div id="notice" class="status" role="status" aria-live="polite"></div>
 <section id="password-page" hidden>
 <h1>Đổi mật khẩu</h1>
@@ -37,6 +37,20 @@
 <label class="check"><input name="acknowledge" type="checkbox"><span>Tôi đã lưu công việc và đồng ý khởi động lại khi cập nhật ngay.</span></label>
 </form>
 <div id="job" class="status" role="status" aria-live="polite"></div>
+</section>
+<section id="opencode-page" hidden>
+<h1>Cập nhật OpenCode</h1>
+<p>Kiểm tra bản OpenCode v2 ổn định và cập nhật thủ công từ nguồn chính thức. Dịch vụ sẽ khởi động lại; các kết nối web và terminal đang mở sẽ bị ngắt.</p>
+<dl class="info"><dt>Phiên bản đang chạy</dt><dd id="native-version">Đang tải…</dd><dt>Phiên bản đã cài</dt><dd id="native-installed">Đang tải…</dd><dt>Bản mới nhất</dt><dd id="native-release">Chưa kiểm tra</dd><dt>Lần kiểm tra gần nhất</dt><dd id="native-checked">Chưa kiểm tra</dd></dl>
+<div id="native-support" class="status" role="status"></div>
+<div class="actions"><button id="native-check" type="button">Kiểm tra phiên bản</button></div>
+<form id="native-form">
+<label>Mật khẩu hiện tại để xác nhận<input name="password" type="password" autocomplete="current-password" maxlength="2048" required></label>
+<label class="check"><input name="acknowledge" type="checkbox" required><span>Tôi đã lưu công việc và đồng ý khởi động lại OpenCode.</span></label>
+<p class="note">Cập nhật OpenCode không tự động chạy. Bộ cập nhật sao lưu bản cài và cơ sở dữ liệu, kiểm tra dịch vụ sau khi cài và khôi phục nếu thất bại.</p>
+<div class="actions"><button type="submit" name="install" class="primary" disabled>Cập nhật OpenCode</button></div>
+</form>
+<div id="native-job" class="status" role="status" aria-live="polite"></div>
 </section>
 <footer>OpenCode Web Login · v{{VERSION}}<br><a href="/" target="_top">Quay lại OpenCode</a> · <a href="/logout" target="_top">Đăng xuất</a></footer>
 </main></body></html>

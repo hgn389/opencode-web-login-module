@@ -4,9 +4,9 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
 
-**Bản thử nghiệm:** [v1.1.1-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.1-beta). Phiên bản gói: `1.1.1-beta`.
+**Bản thử nghiệm:** [v1.1.2-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.2-beta). Phiên bản gói: `1.1.2-beta`.
 
-**Bản này sửa lỗi bảo mật của phiên đăng nhập, API xác thực, WebSocket và lưu trữ mật khẩu trong systemd. Menu đổi mật khẩu và cập nhật qua web vẫn có sẵn; tự động cập nhật mặc định tắt.**
+**Bản này thêm kiểm tra phiên bản và cập nhật OpenCode v2 qua web. Bản vá bảo vệ việc thay tệp thực thi, khóa các tác vụ cập nhật/khôi phục chạy đồng thời và xử lý gián đoạn kết nối hoặc chuẩn bị cập nhật. Tự động cập nhật module mặc định tắt; cập nhật OpenCode luôn thực hiện thủ công.**
 
 ## Cài đặt và cấu hình
 
@@ -17,7 +17,7 @@ Máy đích cần có:
 - OpenCode v2 đã cài, có tài khoản/mật khẩu và dịch vụ Linux đang chạy, ví dụ `opencode.service`.
 - OpenCode hỗ trợ các API `/api/info`, `/api/pair` và `/auth/connect/:code`. Bản v1 dùng API khác, chưa được module hỗ trợ.
 - Node.js **24 trở lên**, npm và Git. Node.js dùng để chạy dịch vụ phải được cài ngoài `/root` và `/home`, ví dụ trong `/usr` hoặc `/usr/local`.
-- Linux có systemd và quyền quản trị nếu chọn cài thành dịch vụ.
+- Linux có systemd và quyền quản trị nếu chọn cài thành dịch vụ. Cập nhật OpenCode qua web cần `flock` và `runuser` (gói `util-linux`).
 
 Kiểm tra trước khi cài module:
 
@@ -31,24 +31,26 @@ sudo systemctl status opencode.service
 
 Ghi lại đường dẫn binary từ `command -v opencode` và tên dịch vụ OpenCode thực tế. Các ví dụ bên dưới dùng `/usr/local/bin/opencode` và `opencode.service`; thay chúng theo máy của bạn. Tài khoản/mật khẩu vẫn do OpenCode quản lý, module không tạo một tài khoản khác.
 
+Dùng bản OpenCode v2 được cài theo phương thức chính thức và đặt binary ở vị trí cố định, tránh `/tmp`. Thêm binary tự dựng vào `PATH` giúp terminal gọi được lệnh, nhưng không giúp `opencode upgrade` nhận diện phương thức cài đặt. Binary mà terminal gọi và binary mà dịch vụ OpenCode sử dụng cần trỏ tới cùng bản cài.
+
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone --branch v1.1.1-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch v1.1.2-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
 sudo npm ci --omit=dev --ignore-scripts
 node bin/opencode-web-login.mjs --help
 ```
 
-Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.1.1-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.1.2-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
 
 #### Cài từ gói `.tgz` trên GitHub Release
 
-Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.1.1-beta.tgz` và `opencode-web-login-1.1.1-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.1-beta). Trong thư mục đã tải, chạy:
+Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.1.2-beta.tgz` và `opencode-web-login-1.1.2-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.2-beta). Trong thư mục đã tải, chạy:
 
 ```sh
-sha256sum --check opencode-web-login-1.1.1-beta.tgz.sha256
-sudo npm install -g ./opencode-web-login-1.1.1-beta.tgz
+sha256sum --check opencode-web-login-1.1.2-beta.tgz.sha256
+sudo npm install -g --ignore-scripts ./opencode-web-login-1.1.2-beta.tgz
 opencode-web-login --help
 ```
 
@@ -92,7 +94,7 @@ Bộ cài sẽ:
 6. Khởi động dịch vụ và kiểm tra cả trang đăng nhập lẫn backend có yêu cầu mật khẩu.
 7. Cài dịch vụ quản trị riêng `opencode-login-admin.service`, giao tiếp với gateway qua Unix socket riêng; gateway vẫn chạy bằng người dùng không có quyền root. Tự động cập nhật mặc định tắt.
 
-Module không cài hoặc cập nhật OpenCode. Bộ cài giữ cơ sở dữ liệu phiên và khóa IP khi cài lại. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ cũ, đồng thời báo vị trí sao lưu Git.
+Bộ cài module không tự cài hoặc cập nhật OpenCode. Bộ cài giữ cơ sở dữ liệu phiên và khóa IP khi cài lại. Nếu cập nhật thất bại sau khi thay đổi dịch vụ, bộ cài khôi phục tệp, thư viện và trạng thái dịch vụ cũ, đồng thời báo vị trí sao lưu Git.
 
 ### 4. Kiểm tra và đăng nhập
 
@@ -116,12 +118,13 @@ Nếu trình duyệt đang giữ trang đăng nhập cũ, nhấn `Ctrl+F5` rồi
 
 #### Đổi mật khẩu và cập nhật qua web
 
-Sau khi đăng nhập, mở **Cài đặt** của OpenCode. Nhóm **Web Login Module** có hai mục:
+Sau khi đăng nhập, mở **Cài đặt** của OpenCode. Nhóm **Web Login Module** có ba mục:
 
 - **Đổi mật khẩu:** nhập mật khẩu hiện tại, mật khẩu mới từ 16 đến 128 ký tự, xác nhận lại và đánh dấu đã lưu công việc. Module sao lưu cấu hình bằng Git, đổi mật khẩu thật của OpenCode và khởi động lại dịch vụ. Mọi phiên đăng nhập bị thu hồi; đăng nhập lại bằng mật khẩu mới. Nếu khởi động thất bại, module khôi phục cấu hình trước đó.
 - **Cập nhật Web Login Module:** kiểm tra bản mới, chọn kênh **Bản ổn định** hoặc **Bản ổn định và beta**, bật/tắt tự động cập nhật hoặc bấm **Cập nhật ngay**. Lưu cấu hình và cài bản mới đều yêu cầu mật khẩu hiện tại. Cập nhật thủ công yêu cầu xác nhận đã lưu công việc; tự động cập nhật cũng sẽ khởi động lại dịch vụ khi có bản mới.
+- **Cập nhật OpenCode:** xem phiên bản đang chạy, phiên bản đã cài và kiểm tra bản OpenCode v2 ổn định mới nhất. Nhập mật khẩu hiện tại, xác nhận đã lưu công việc rồi cập nhật. Chức năng này chỉ chạy thủ công và có cơ chế sao lưu, kiểm tra dịch vụ, khôi phục riêng.
 
-Trên điện thoại, hai nút xuất hiện ngay dưới thanh điều hướng Cài đặt. Nếu bản OpenCode khác đã đổi cấu trúc menu, mở trực tiếp `/web-login/password` hoặc `/web-login/updates` trên cùng địa chỉ gateway. Chưa đăng nhập sẽ không truy cập được các chức năng này.
+Trên điện thoại, các nút xuất hiện ngay dưới thanh điều hướng Cài đặt. Nếu bản OpenCode khác đã đổi cấu trúc menu, mở trực tiếp `/web-login/password`, `/web-login/updates` hoặc `/web-login/opencode` trên cùng địa chỉ gateway. Chưa đăng nhập sẽ không truy cập được các chức năng này.
 
 Menu được tích hợp bằng script do gateway phục vụ trên cùng origin, không sửa tệp OpenCode. Bản OpenCode hiện tại chỉ nạp các trang cài đặt GUI tích hợp sẵn, chưa nạp renderer của extension bên ngoài; vì vậy đây là phần tích hợp của Web Login Module, không phải plugin GUI chính thức. Tích hợp menu áp dụng cho giao diện truy cập qua gateway.
 
@@ -133,9 +136,45 @@ Trang cập nhật tiếp tục kiểm tra kết quả khi dịch vụ tạm ng�
 
 Yêu cầu giả mạo origin/CSRF bị từ chối. Nhập sai mật khẩu xác nhận cũng tính vào bộ đếm IP: đến 5 lần sẽ yêu cầu đăng nhập lại với CAPTCHA, đến 10 lần khóa IP. Mật khẩu mới không được ghi vào log hoặc repository công khai.
 
-Đăng nhập tạm dừng khi đang đổi mật khẩu, không tính thành nhập sai. Nếu đã bật dịch vụ quản trị nhưng dịch vụ này không phản hồi, gateway tạm từ chối tạo phiên mới. Thu hồi toàn bộ phiên, kể cả bằng CLI, cũng vô hiệu hóa những lần đăng nhập đang xử lý để chúng không tạo lại phiên sau lệnh thu hồi.
+Đăng nhập tạm dừng khi đang đổi mật khẩu, cập nhật OpenCode hoặc cần khôi phục tác vụ bị gián đoạn, không tính thành nhập sai. Nếu đã bật dịch vụ quản trị nhưng dịch vụ này không phản hồi, gateway tạm từ chối tạo phiên mới. Thu hồi toàn bộ phiên, kể cả bằng CLI, cũng vô hiệu hóa những lần đăng nhập đang xử lý để chúng không tạo lại phiên sau lệnh thu hồi.
 
-Nếu đang dùng bản module cũ, lấy tag `v1.1.1-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
+Nếu đang dùng bản module cũ, lấy tag `v1.1.2-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
+
+#### Cập nhật OpenCode qua terminal
+
+Với OpenCode được cài theo phương thức chính thức, lưu công việc rồi chạy:
+
+```sh
+sudo opencode upgrade
+sudo systemctl restart opencode.service
+opencode --version
+```
+
+Thay `opencode.service` bằng tên dịch vụ thực tế nếu khác. Lệnh khởi động lại sẽ ngắt kết nối web trong thời gian dịch vụ khởi động. Nếu binary mới nằm ở đường dẫn khác, chạy lại bước 3 với `--opencode-bin` mới và đầy đủ tùy chọn đang dùng để đồng bộ cấu hình quản trị.
+
+Nếu gặp `Could not detect the installation method`, cần chuyển bản dựng/sao chép thủ công sang phương thức cài chính thức và đồng bộ đường dẫn dịch vụ trước. Khi chuyển kênh hoặc bản dựng OpenCode, sao lưu dữ liệu và kiểm tra tệp cơ sở dữ liệu; các kênh có thể dùng tên tệp khác nhau.
+
+Menu **Cập nhật Web Login Module** quản lý phiên bản của module. Nâng cấp OpenCode thực hiện bằng các lệnh trên hoặc mục **Cập nhật OpenCode** khi dùng mã mới có chức năng này.
+
+#### Cập nhật OpenCode qua web
+
+Yêu cầu bản OpenCode v2 ổn định cài global bằng npm với gói chính thức `@opencode/cli`. Binary phải ở đường dẫn cố định ngoài `/root`, `/home`, `/tmp`; các tệp và thư mục cài đặt do root quản lý, không cho nhóm/người khác ghi. Binary của terminal, cấu hình quản trị và dịch vụ OpenCode cần dùng chung bản cài. Với bản tự dựng hoặc phương thức khác, trang vẫn có thể đọc phiên bản đang chạy nhưng sẽ giải thích vì sao chưa hỗ trợ cập nhật qua web.
+
+Mở **Cài đặt → Web Login Module → Cập nhật OpenCode**, hoặc `/web-login/opencode` sau khi đăng nhập. Bấm **Kiểm tra phiên bản**; nếu có bản v2 ổn định cao hơn, nút cập nhật được bật. Nếu đã cài bản mới bằng terminal nhưng chưa khởi động lại dịch vụ, trang cho phép áp dụng bản đã cài. Không hạ phiên bản hoặc chuyển sang bản beta/major khác qua chức năng này.
+
+Nhập mật khẩu hiện tại và đánh dấu xác nhận đã lưu công việc. Bộ cập nhật tải gói từ `registry.npmjs.org`, xác minh SHA-512, chuẩn bị và kiểm tra binary trước khi dừng dịch vụ. Các lifecycle script của npm bị tắt; binary được kiểm tra bằng người dùng chạy dịch vụ OpenCode. Tệp cài đặt được sao lưu bằng Git riêng, còn cơ sở dữ liệu SQLite được sao lưu nhất quán bằng tài khoản dịch vụ trước khi thay bản cài. Không nhận URL, tên gói, phiên bản tùy ý hoặc lệnh shell từ trình duyệt.
+
+Sau khi cập nhật, bộ quản trị kiểm tra đúng phiên bản, yêu cầu mật khẩu của backend và danh sách hội thoại. Nếu thất bại, bộ quản trị khôi phục bản cài và cơ sở dữ liệu đã sao lưu rồi khởi động lại. Giao diện tiếp tục theo dõi kết quả khi dịch vụ tạm ngắt kết nối. Thay binary dùng tệp tạm và đổi tên nguyên tử, từ chối đích là liên kết tệp. Bộ cập nhật và lệnh khôi phục dùng chung khóa hệ thống, tự nhả khi tiến trình kết thúc. Mỗi thời điểm chỉ chạy một tác vụ đổi mật khẩu hoặc cập nhật; tự động cập nhật module không tự cập nhật OpenCode.
+
+Bản sao lưu nằm tại `/var/lib/NAME-opencode-backup/`, quyền `0700`; có thể chứa hội thoại riêng và các binary dung lượng lớn. Không đưa thư mục này lên GitHub. Giữ đủ dung lượng đĩa cho bản chuẩn bị và bản sao lưu; module giữ lại bản sao lưu để quản trị viên kiểm tra.
+
+Nếu tác vụ bị ngắt đột ngột hoặc báo cần khôi phục, kiểm tra dịch vụ và bản sao lưu bằng SSH. Với bộ cài mặc định, có thể yêu cầu khôi phục tác vụ OpenCode bị gián đoạn:
+
+```sh
+sudo node /opt/opencode-login/admin-service.mjs opencode-recover /etc/opencode-login-admin.json
+```
+
+Thay đường dẫn/tên dịch vụ theo instance nếu đã tùy chỉnh. Lệnh này chỉ dùng cho tác vụ bị gián đoạn, từ chối khi bộ cập nhật hoặc một lệnh khôi phục khác còn chạy, hoặc tác vụ đã thành công. Nếu tác vụ bị ngắt trước khi dừng dịch vụ và chưa tạo bản sao lưu, lệnh chỉ gỡ trạng thái chờ khôi phục sau khi xác nhận bản cài cũ cùng dịch vụ có yêu cầu mật khẩu vẫn hoạt động; không dừng hay cài lại dịch vụ trong trường hợp này. Không tự thử lại lệnh cập nhật khi chưa xử lý trạng thái cần khôi phục.
 
 ### 5. Thay đổi cấu hình sau khi cài
 

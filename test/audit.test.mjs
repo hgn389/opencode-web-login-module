@@ -182,12 +182,12 @@ test('global session revocation cancels login verification already in progress',
   }
 });
 
-test('login waits for password rotation to complete without checking credentials or counting failures', async () => {
+test('login waits for password rotation, native updates and recovery without checking credentials', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'login-audit-password-job-'));
   const socket = join(dir, 'admin.sock');
-  let passwordChecks = 0;
+  let passwordChecks = 0, job = { type: 'password', phase: 'running' };
   const helper = http.createServer((req, res) => { req.resume(); res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ status: 200, job: { type: 'password', phase: 'running' } })); });
+    res.end(JSON.stringify({ status: 200, job })); });
   const backend = http.createServer((req, res) => { passwordChecks++; res.writeHead(401); res.end(); });
   helper.listen(socket); backend.listen(0, '127.0.0.1');
   await Promise.all([once(helper, 'listening'), once(backend, 'listening')]);
@@ -199,11 +199,16 @@ test('login waits for password rotation to complete without checking credentials
     const html = await form.text();
     const csrf = /name="csrf" value="([^"]+)"/.exec(html)[1];
     const cookie = form.headers.getSetCookie()[0].split(';')[0];
-    const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, cookie, 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username: 'opencode', password, csrf }).toString() });
-    assert.equal(response.status, 503);
-    assert.match(await response.text(), /đổi mật khẩu/);
+    for (const value of [{ type: 'password', phase: 'running' }, { type: 'opencode-update', phase: 'starting' }, { type: 'opencode-update', phase: 'failed', recoveryRequired: true }]) {
+      job = value;
+      const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: 'opencode', password, csrf }).toString() });
+      assert.equal(response.status, 503);
+      assert.match(await response.text(), /tác vụ quản trị/);
+    }
     assert.equal(passwordChecks, 0);
+    const store = new SecurityStore(join(dir, 'state.sqlite'));
+    assert.equal(store.state('127.0.0.1').failures, 0); store.close();
   } finally {
     await gateway.close(); helper.closeAllConnections(); backend.closeAllConnections();
     await Promise.all([new Promise(resolve => helper.close(resolve)), new Promise(resolve => backend.close(resolve))]);

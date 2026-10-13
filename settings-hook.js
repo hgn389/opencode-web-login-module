@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const items = [['password', 'Đổi mật khẩu'], ['updates', 'Cập nhật Web Login Module']];
+  const items = [['password', 'Đổi mật khẩu'], ['updates', 'Cập nhật Web Login Module'], ['opencode', 'Cập nhật OpenCode']];
   let dialog, frame, focusBefore;
   function close() {
     if (!dialog) return;
