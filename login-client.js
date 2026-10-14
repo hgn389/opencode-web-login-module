@@ -1,3 +1,5 @@
+import { i18n } from '/login/i18n-client.js';
+
 const form = document.querySelector('form[action="/login"]');
 if (form && !form.querySelector('fieldset').disabled) {
   let pending = false;
@@ -13,7 +15,7 @@ if (form && !form.querySelector('fieldset').disabled) {
     button.disabled = true;
     try {
       const response = await fetch('/login/session', {
-        credentials: 'same-origin', cache: 'no-store', headers: { 'X-OpenCode-Login': '1' }, signal: controller.signal,
+        credentials: 'same-origin', cache: 'no-store', headers: { 'X-OpenCode-Login': '1', 'X-Web-Login-Locale': i18n.locale }, signal: controller.signal,
       });
       const session = await response.json();
       if (!response.ok) throw new Error(session.message || 'Không thể chuẩn bị phiên đăng nhập. Vui lòng thử lại.');
@@ -24,16 +26,16 @@ if (form && !form.querySelector('fieldset').disabled) {
       if (session.captcha && captcha && (changed || session.refreshed)) {
         form.querySelector('.captcha img').src = '/login/captcha?refresh=' + Date.now();
         captcha.value = '';
-        message.textContent = 'Mã xác minh đã hết hạn. Vui lòng nhập mã mới.';
+        i18n.text(message, () => ('Mã xác minh đã hết hạn. Vui lòng nhập mã mới.'));
         captcha.focus();
         return;
       }
       HTMLFormElement.prototype.submit.call(form);
       submitted = true;
     } catch (error) {
-      message.textContent = error.name === 'AbortError'
+      i18n.text(message, () => (error.name === 'AbortError'
         ? 'Kết nối bị chậm. Vui lòng thử lại.'
-        : error instanceof TypeError || error instanceof SyntaxError ? 'Không kết nối được với máy chủ. Vui lòng thử lại.' : error.message;
+        : error instanceof TypeError || error instanceof SyntaxError ? 'Không kết nối được với máy chủ. Vui lòng thử lại.' : error.message));
     } finally { clearTimeout(timeout); if (!submitted) { pending = false; button.disabled = false; } }
   });
 }

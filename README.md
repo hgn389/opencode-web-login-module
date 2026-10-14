@@ -4,9 +4,11 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
 
-**Bản thử nghiệm:** [v1.1.2-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.2-beta). Phiên bản gói: `1.1.2-beta`.
+**Bản thử nghiệm:** [v1.2.0-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.0-beta). Phiên bản gói: `1.2.0-beta`.
 
-**Bản này thêm kiểm tra phiên bản và cập nhật OpenCode v2 qua web. Bản vá bảo vệ việc thay tệp thực thi, khóa các tác vụ cập nhật/khôi phục chạy đồng thời và xử lý gián đoạn kết nối hoặc chuẩn bị cập nhật. Tự động cập nhật module mặc định tắt; cập nhật OpenCode luôn thực hiện thủ công.**
+**v1.2.0-beta bổ sung Update & Downgrade cho OpenCode, nhà cung cấp tùy chỉnh trên web, quét/chọn tối đa 2.000 model, popup lớn hơn và 63 ngôn ngữ đồng bộ với OpenCode. Tự động cập nhật module mặc định tắt; cập nhật/hạ cấp OpenCode luôn thực hiện thủ công.**
+
+**Nâng cấp từ v1.1.2-beta trở xuống:** dùng quy trình nâng cấp thủ công ở bước 2. Bộ cập nhật qua web của các bản cũ từ chối những tệp mới ngoài danh sách đã đóng gói; không dùng nút **Cập nhật ngay** của bản cũ để cài lần chuyển này.
 
 ## Cài đặt và cấu hình
 
@@ -14,8 +16,8 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 Máy đích cần có:
 
-- OpenCode v2 đã cài, có tài khoản/mật khẩu và dịch vụ Linux đang chạy, ví dụ `opencode.service`.
-- OpenCode hỗ trợ các API `/api/info`, `/api/pair` và `/auth/connect/:code`. Bản v1 dùng API khác, chưa được module hỗ trợ.
+- OpenCode đã cài, có tài khoản/mật khẩu và dịch vụ Linux đang chạy, ví dụ `opencode.service`. Hỗ trợ OpenCode v2 và OpenCode v1 ổn định từ `1.18.20`.
+- OpenCode v2 dùng các API `/api/info`, `/api/pair` và `/auth/connect/:code`. OpenCode v1 dùng `/global/health` và HTTP Basic ở backend; trình duyệt vẫn đăng nhập bằng biểu mẫu của module.
 - Node.js **24 trở lên**, npm và Git. Node.js dùng để chạy dịch vụ phải được cài ngoài `/root` và `/home`, ví dụ trong `/usr` hoặc `/usr/local`.
 - Linux có systemd và quyền quản trị nếu chọn cài thành dịch vụ. Cập nhật OpenCode qua web cần `flock` và `runuser` (gói `util-linux`).
 
@@ -36,25 +38,42 @@ Dùng bản OpenCode v2 được cài theo phương thức chính thức và đ�
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone --branch v1.1.2-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch v1.2.0-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
 sudo npm ci --omit=dev --ignore-scripts
 node bin/opencode-web-login.mjs --help
 ```
 
-Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.1.2-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.2.0-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
 
 #### Cài từ gói `.tgz` trên GitHub Release
 
-Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.1.2-beta.tgz` và `opencode-web-login-1.1.2-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.1.2-beta). Trong thư mục đã tải, chạy:
+Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.2.0-beta.tgz` và `opencode-web-login-1.2.0-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.0-beta). Trong thư mục đã tải, chạy:
 
 ```sh
-sha256sum --check opencode-web-login-1.1.2-beta.tgz.sha256
-sudo npm install -g --ignore-scripts ./opencode-web-login-1.1.2-beta.tgz
+sha256sum --check opencode-web-login-1.2.0-beta.tgz.sha256
+sudo npm install -g --ignore-scripts ./opencode-web-login-1.2.0-beta.tgz
 opencode-web-login --help
 ```
 
 Sau khi cài gói, dùng `sudo opencode-web-login install` thay cho `sudo node /opt/opencode-web-login-src/bin/opencode-web-login.mjs install` trong các lệnh ở bước 3, giữ nguyên các tùy chọn phù hợp với máy của bạn. Gói phát hành cần tải thư viện từ npm khi cài đặt; không có mật khẩu hoặc cấu hình của máy chủ trong gói.
+
+#### Nâng cấp từ bản đã cài
+
+Nếu đã clone mã nguồn theo hướng dẫn, chạy trong thư mục mã nguồn:
+
+```sh
+cd /opt/opencode-web-login-src
+sudo git fetch origin --tags
+sudo git checkout --detach v1.2.0-beta
+sudo npm ci --omit=dev --ignore-scripts
+```
+
+Sau đó chạy lại lệnh **cài thật ở bước 3**, giữ nguyên các tùy chọn cài đặt đang dùng, gồm đường dẫn OpenCode, tên dịch vụ, địa chỉ/cổng, domain và trusted proxy nếu có. Chạy với `--dry-run` trước để kiểm tra. Bộ cài sao lưu, giữ cơ sở dữ liệu phiên/khóa IP và khôi phục khi thất bại. Nếu Git báo có thay đổi cục bộ, lưu hoặc xử lý chúng trước khi chuyển tag; không dùng tùy chọn ép ghi đè.
+
+Nếu đã cài CLI global từ `.tgz`, xác minh SHA-256 rồi cài gói `1.2.0-beta` như trên, sau đó chạy lại `sudo opencode-web-login install` với các tùy chọn cũ. Cài gói global chỉ thay CLI; cần bước `install` để cập nhật dịch vụ đang chạy.
+
+Các bản từ `v1.1.2-beta` trở xuống cần quy trình thủ công này do bản mới bổ sung tệp chương trình và bản dịch. Bản cũ từ chối gói mới một cách an toàn, thay vì bỏ qua những tệp chưa biết. Không cần tắt kiểm tra gói hoặc mở cổng backend để nâng cấp.
 
 ### 3. Cài module thành dịch vụ
 
@@ -116,15 +135,23 @@ Nhập tài khoản/mật khẩu OpenCode. Khi đăng nhập thành công, trìn
 
 Nếu trình duyệt đang giữ trang đăng nhập cũ, nhấn `Ctrl+F5` rồi thử lại. Nếu trang báo chưa gửi cookie, cho phép cookie cho địa chỉ này. Lỗi phiên hoặc CAPTCHA không được tính là nhập sai tài khoản/mật khẩu.
 
-#### Đổi mật khẩu và cập nhật qua web
+#### Quản trị qua web
 
-Sau khi đăng nhập, mở **Cài đặt** của OpenCode. Nhóm **Web Login Module** có ba mục:
+Sau khi đăng nhập, mở **Cài đặt** của OpenCode. Nhóm **Web Login Module** có bốn mục:
 
 - **Đổi mật khẩu:** nhập mật khẩu hiện tại, mật khẩu mới từ 16 đến 128 ký tự, xác nhận lại và đánh dấu đã lưu công việc. Module sao lưu cấu hình bằng Git, đổi mật khẩu thật của OpenCode và khởi động lại dịch vụ. Mọi phiên đăng nhập bị thu hồi; đăng nhập lại bằng mật khẩu mới. Nếu khởi động thất bại, module khôi phục cấu hình trước đó.
 - **Cập nhật Web Login Module:** kiểm tra bản mới, chọn kênh **Bản ổn định** hoặc **Bản ổn định và beta**, bật/tắt tự động cập nhật hoặc bấm **Cập nhật ngay**. Lưu cấu hình và cài bản mới đều yêu cầu mật khẩu hiện tại. Cập nhật thủ công yêu cầu xác nhận đã lưu công việc; tự động cập nhật cũng sẽ khởi động lại dịch vụ khi có bản mới.
-- **Cập nhật OpenCode:** xem phiên bản đang chạy, phiên bản đã cài và kiểm tra bản OpenCode v2 ổn định mới nhất. Nhập mật khẩu hiện tại, xác nhận đã lưu công việc rồi cập nhật. Chức năng này chỉ chạy thủ công và có cơ chế sao lưu, kiểm tra dịch vụ, khôi phục riêng.
+- **Update & Downgrade**: xem phiên bản đang chạy/đã cài, kiểm tra bản mới nhất của nhánh hiện tại, chọn phiên bản muốn cập nhật hoặc hạ cấp. Hỗ trợ OpenCode v2 và v1 từ `1.18.20`. Nhập mật khẩu hiện tại, xác nhận đã lưu công việc rồi bấm nút xác nhận tương ứng; thao tác luôn chạy thủ công, có sao lưu và khôi phục khi thất bại.
 
-Trên điện thoại, các nút xuất hiện ngay dưới thanh điều hướng Cài đặt. Nếu bản OpenCode khác đã đổi cấu trúc menu, mở trực tiếp `/web-login/password`, `/web-login/updates` hoặc `/web-login/opencode` trên cùng địa chỉ gateway. Chưa đăng nhập sẽ không truy cập được các chức năng này.
+- **Nhà cung cấp tùy chỉnh**: thêm, sửa hoặc xóa provider OpenAI-compatible trong cấu hình OpenCode v2; khai báo Base URL, API key và model qua web, có sao lưu riêng và kiểm tra sau khi tải lại cấu hình.
+
+Trên điện thoại, các nút xuất hiện ngay dưới thanh điều hướng Cài đặt. Nếu bản OpenCode khác đã đổi cấu trúc menu, mở trực tiếp `/web-login/password`, `/web-login/updates`, `/web-login/opencode` hoặc `/web-login/providers` trên cùng địa chỉ gateway. Chưa đăng nhập sẽ không truy cập được các chức năng này.
+
+**Đa ngôn ngữ:** module đồng bộ **63 ngôn ngữ** với bộ chọn ngôn ngữ của OpenCode hiện tại. Đổi ngôn ngữ trong OpenCode sẽ cập nhật menu, tiêu đề popup và biểu mẫu đang mở; dữ liệu nhập và các lựa chọn model được giữ lại. Ngôn ngữ viết từ phải sang trái có bố cục RTL. Các trường URL, API key và Model ID vẫn hiển thị từ trái sang phải để tránh đọc nhầm.
+
+Trang đăng nhập có bộ chọn ngôn ngữ riêng. Lựa chọn được lưu trong trình duyệt và dùng cho OpenCode khi đăng nhập; khi chưa có lựa chọn, module dùng ngôn ngữ trình duyệt. Trang đăng xuất, CAPTCHA, lỗi đăng nhập và thông báo quản trị cũng được dịch. Ngôn ngữ chưa hỗ trợ hoặc khóa dịch còn thiếu dùng bản tiếng Anh dự phòng. Bản dịch được đóng gói cùng module, không gọi dịch vụ dịch bên ngoài trong quá trình sử dụng và không gửi thông tin đăng nhập đi để dịch.
+
+Popup quản trị có kích thước tối đa **960 × 1060 px**, tự thu nhỏ theo cửa sổ trình duyệt, chừa khoảng cách với mép màn hình. Nội dung dài cuộn bên trong popup; nút đóng luôn nằm ở đầu bảng.
 
 Menu được tích hợp bằng script do gateway phục vụ trên cùng origin, không sửa tệp OpenCode. Bản OpenCode hiện tại chỉ nạp các trang cài đặt GUI tích hợp sẵn, chưa nạp renderer của extension bên ngoài; vì vậy đây là phần tích hợp của Web Login Module, không phải plugin GUI chính thức. Tích hợp menu áp dụng cho giao diện truy cập qua gateway.
 
@@ -138,7 +165,7 @@ Yêu cầu giả mạo origin/CSRF bị từ chối. Nhập sai mật khẩu xá
 
 Đăng nhập tạm dừng khi đang đổi mật khẩu, cập nhật OpenCode hoặc cần khôi phục tác vụ bị gián đoạn, không tính thành nhập sai. Nếu đã bật dịch vụ quản trị nhưng dịch vụ này không phản hồi, gateway tạm từ chối tạo phiên mới. Thu hồi toàn bộ phiên, kể cả bằng CLI, cũng vô hiệu hóa những lần đăng nhập đang xử lý để chúng không tạo lại phiên sau lệnh thu hồi.
 
-Nếu đang dùng bản module cũ, lấy tag `v1.1.2-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
+Nếu đang dùng bản module cũ, lấy tag `v1.2.0-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
 
 #### Cập nhật OpenCode qua terminal
 
@@ -154,17 +181,30 @@ Thay `opencode.service` bằng tên dịch vụ thực tế nếu khác. Lệnh 
 
 Nếu gặp `Could not detect the installation method`, cần chuyển bản dựng/sao chép thủ công sang phương thức cài chính thức và đồng bộ đường dẫn dịch vụ trước. Khi chuyển kênh hoặc bản dựng OpenCode, sao lưu dữ liệu và kiểm tra tệp cơ sở dữ liệu; các kênh có thể dùng tên tệp khác nhau.
 
-Menu **Cập nhật Web Login Module** quản lý phiên bản của module. Nâng cấp OpenCode thực hiện bằng các lệnh trên hoặc mục **Cập nhật OpenCode** khi dùng mã mới có chức năng này.
+Menu **Cập nhật Web Login Module** quản lý phiên bản của module. Nâng cấp OpenCode thực hiện bằng các lệnh trên hoặc mục **Update & Downgrade** trong bản này.
 
-#### Cập nhật OpenCode qua web
+#### Update & Downgrade qua web
 
-Yêu cầu bản OpenCode v2 ổn định cài global bằng npm với gói chính thức `@opencode/cli`. Binary phải ở đường dẫn cố định ngoài `/root`, `/home`, `/tmp`; các tệp và thư mục cài đặt do root quản lý, không cho nhóm/người khác ghi. Binary của terminal, cấu hình quản trị và dịch vụ OpenCode cần dùng chung bản cài. Với bản tự dựng hoặc phương thức khác, trang vẫn có thể đọc phiên bản đang chạy nhưng sẽ giải thích vì sao chưa hỗ trợ cập nhật qua web.
+Yêu cầu OpenCode v2 ổn định với gói chính thức `@opencode/cli`, hoặc OpenCode v1 ổn định từ `1.18.20` với gói `opencode-ai`, cài global bằng npm. Binary phải ở đường dẫn cố định ngoài `/root`, `/home`, `/tmp`; các tệp và thư mục cài đặt do root quản lý, không cho nhóm/người khác ghi. Binary của terminal, cấu hình quản trị và dịch vụ OpenCode cần dùng chung bản cài. Với bản tự dựng hoặc phương thức khác, trang vẫn có thể đọc phiên bản đang chạy nhưng sẽ giải thích vì sao chưa hỗ trợ cập nhật qua web.
 
-Mở **Cài đặt → Web Login Module → Cập nhật OpenCode**, hoặc `/web-login/opencode` sau khi đăng nhập. Bấm **Kiểm tra phiên bản**; nếu có bản v2 ổn định cao hơn, nút cập nhật được bật. Nếu đã cài bản mới bằng terminal nhưng chưa khởi động lại dịch vụ, trang cho phép áp dụng bản đã cài. Không hạ phiên bản hoặc chuyển sang bản beta/major khác qua chức năng này.
+Mở **Cài đặt → Web Login Module → Update & Downgrade**, hoặc `/web-login/opencode` sau khi đăng nhập:
 
-Nhập mật khẩu hiện tại và đánh dấu xác nhận đã lưu công việc. Bộ cập nhật tải gói từ `registry.npmjs.org`, xác minh SHA-512, chuẩn bị và kiểm tra binary trước khi dừng dịch vụ. Các lifecycle script của npm bị tắt; binary được kiểm tra bằng người dùng chạy dịch vụ OpenCode. Tệp cài đặt được sao lưu bằng Git riêng, còn cơ sở dữ liệu SQLite được sao lưu nhất quán bằng tài khoản dịch vụ trước khi thay bản cài. Không nhận URL, tên gói, phiên bản tùy ý hoặc lệnh shell từ trình duyệt.
+1. Bấm **Kiểm tra phiên bản** để tải bản mới nhất của nhánh đang dùng và danh sách các phiên bản ổn định gần đây từ kho chính thức.
+2. Trong **Phiên bản muốn cài**, chọn phiên bản cần dùng, ví dụ `v1.18.20`. Chọn bản thấp hơn để hạ cấp, bản cao hơn để cập nhật; để lựa chọn mặc định nếu muốn bản mới nhất của nhánh hiện tại.
+3. Nhập mật khẩu OpenCode hiện tại và đánh dấu đã lưu công việc.
+4. Bấm **Xác nhận hạ cấp v1.18.20** hoặc nút xác nhận cập nhật tương ứng. Trang sẽ theo dõi kết quả khi dịch vụ khởi động lại. Nếu đổi nhánh v1/v2, mọi phiên đăng nhập được thu hồi; đăng nhập lại sau khi hoàn tất.
+
+Chỉ cho chọn bản ổn định từ danh sách chính thức, chưa hỗ trợ beta hoặc v1 trước `1.18.20`. Phiên bản được kiểm tra lại phía máy chủ; không nhận URL hay lệnh cài từ trình duyệt. Thay lựa chọn phiên bản sẽ bỏ đánh dấu xác nhận trước đó. Bản đang cài không được cài lại khi không cần khởi động lại.
+
+Nhập mật khẩu hiện tại và đánh dấu xác nhận đã lưu công việc. Bộ cập nhật tải gói từ `registry.npmjs.org`, xác minh SHA-512, chuẩn bị và kiểm tra binary trước khi dừng dịch vụ. Các lifecycle script của npm bị tắt; binary được kiểm tra bằng người dùng chạy dịch vụ OpenCode. Tệp cài đặt được sao lưu bằng Git riêng, còn cơ sở dữ liệu SQLite được sao lưu nhất quán bằng tài khoản dịch vụ trước khi thay bản cài. Trình duyệt chỉ gửi số phiên bản đã chọn trong danh sách; máy chủ tự xác định gói và URL chính thức, kiểm tra metadata cùng checksum. Không nhận tên gói, URL hoặc lệnh shell tùy ý.
 
 Sau khi cập nhật, bộ quản trị kiểm tra đúng phiên bản, yêu cầu mật khẩu của backend và danh sách hội thoại. Nếu thất bại, bộ quản trị khôi phục bản cài và cơ sở dữ liệu đã sao lưu rồi khởi động lại. Giao diện tiếp tục theo dõi kết quả khi dịch vụ tạm ngắt kết nối. Thay binary dùng tệp tạm và đổi tên nguyên tử, từ chối đích là liên kết tệp. Bộ cập nhật và lệnh khôi phục dùng chung khóa hệ thống, tự nhả khi tiến trình kết thúc. Mỗi thời điểm chỉ chạy một tác vụ đổi mật khẩu hoặc cập nhật; tự động cập nhật module không tự cập nhật OpenCode.
+
+**Dữ liệu khi hạ cấp:** giữa các bản cùng nhánh, cơ sở dữ liệu được sao lưu trước khi thay bản cài; nếu bản cũ không đọc được dữ liệu mới, bộ quản trị khôi phục bản cài và dữ liệu trước đó. Khi chuyển v2 ↔ v1, mỗi nhánh dùng một cơ sở dữ liệu hội thoại riêng; không mở cơ sở dữ liệu v2 bằng binary v1, không tự chuyển hội thoại giữa hai nhánh. Lần đầu chuyển nhánh có thể chưa có hội thoại; trở lại nhánh cũ sẽ dùng lại dữ liệu của nhánh đó. Cấu hình và thông tin nhà cung cấp vẫn ở vị trí hiện tại; nếu cấu hình không tương thích, cập nhật thất bại sẽ khôi phục bản trước.
+
+Ánh xạ cơ sở dữ liệu của hai nhánh nằm trong `/var/lib/NAME-admin/database-branches.json` và drop-in `95-web-login-version.conf` của dịch vụ OpenCode. Không sửa những tệp này khi đang cập nhật. Khi chọn phiên bản thủ công, bộ quản trị đặt `OPENCODE_DISABLE_AUTOUPDATE=1` trong drop-in `96-web-login-manual-version.conf`, tránh OpenCode tự nâng lại bản vừa hạ. Thiết lập này được sao lưu và khôi phục nếu tác vụ thất bại; cơ chế tự cập nhật riêng của Web Login Module giữ nguyên cấu hình đã chọn.
+
+Với OpenCode v1, thông tin xác thực backend của mỗi phiên được mã hóa AES-256-GCM, gắn với origin và lưu trong cơ sở dữ liệu bảo mật riêng. Khóa mã hóa nằm tại tệp `security.sqlite.key`, quyền `0600`, cùng thư mục trạng thái riêng `0700`; không đưa cả cơ sở dữ liệu lẫn khóa lên GitHub. Trình duyệt chỉ giữ cookie phiên ngẫu nhiên, không giữ mật khẩu backend hoặc hiển thị popup Basic Auth.
 
 Bản sao lưu nằm tại `/var/lib/NAME-opencode-backup/`, quyền `0700`; có thể chứa hội thoại riêng và các binary dung lượng lớn. Không đưa thư mục này lên GitHub. Giữ đủ dung lượng đĩa cho bản chuẩn bị và bản sao lưu; module giữ lại bản sao lưu để quản trị viên kiểm tra.
 
@@ -175,6 +215,38 @@ sudo node /opt/opencode-login/admin-service.mjs opencode-recover /etc/opencode-l
 ```
 
 Thay đường dẫn/tên dịch vụ theo instance nếu đã tùy chỉnh. Lệnh này chỉ dùng cho tác vụ bị gián đoạn, từ chối khi bộ cập nhật hoặc một lệnh khôi phục khác còn chạy, hoặc tác vụ đã thành công. Nếu tác vụ bị ngắt trước khi dừng dịch vụ và chưa tạo bản sao lưu, lệnh chỉ gỡ trạng thái chờ khôi phục sau khi xác nhận bản cài cũ cùng dịch vụ có yêu cầu mật khẩu vẫn hoạt động; không dừng hay cài lại dịch vụ trong trường hợp này. Không tự thử lại lệnh cập nhật khi chưa xử lý trạng thái cần khôi phục.
+
+#### Nhà cung cấp tùy chỉnh cho OpenCode v2
+
+Chức năng này lưu provider bằng cấu hình tệp, theo cách khắc phục trong [báo cáo lỗi Custom Provider #53873](https://github.com/anomalyco/opencode/issues/53873) và [hướng dẫn provider của OpenCode v2](https://dev.opencode.ai/v2/docs/providers/). Đây là biểu mẫu riêng của module khi truy cập qua gateway; không sửa chương trình OpenCode hoặc biểu mẫu của ứng dụng Desktop. Desktop dùng chung backend có thể sử dụng model đã cấu hình trên backend đó; Desktop chạy backend riêng cần cấu hình riêng.
+
+Mở **Cài đặt → Web Login Module → Nhà cung cấp tùy chỉnh**, hoặc `/web-login/providers` sau khi đăng nhập:
+
+1. Chọn **Thêm nhà cung cấp mới** hoặc chọn provider hiện có để sửa.
+2. Nhập **ID**, **Tên hiển thị**, **Base URL** và API key nếu API yêu cầu. Ví dụ: ID `my-provider`, URL `https://api.example.com/v1`; đây là dữ liệu mẫu, cần thay theo dịch vụ thực tế.
+3. Nhập mật khẩu OpenCode hiện tại rồi bấm **Quét model** để lấy danh sách từ `Base URL/models`, hoặc nhập Model ID thủ công. Dùng **Select All** để chọn tất cả, **Uncheck All** để bỏ chọn tất cả, sau đó đánh dấu các model cần dùng. Chỉ model được chọn mới được lưu; tối đa 2000 model. Tên hiển thị model là tùy chọn.
+4. Nhập mật khẩu OpenCode hiện tại, xác nhận đồng ý tải lại cấu hình rồi bấm **Lưu nhà cung cấp**. Module kiểm tra provider và model đã xuất hiện trong OpenCode, không gửi yêu cầu tạo nội dung có tính phí để thử API key.
+5. Khi thành công, tải lại giao diện OpenCode và chọn model dạng `my-provider/MODEL_ID`. Để xóa, chọn provider, nhập mật khẩu, xác nhận rồi bấm **Xóa nhà cung cấp**.
+
+**Quét model:** hỗ trợ API danh sách model OpenAI-compatible, gồm [9router](https://github.com/decolua/9router), [OmniRoute](https://github.com/devolkus/omniroute) và [OpenRouter](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties). Với OpenRouter, Base URL là `https://openrouter.ai/api/v1`; với router tự triển khai, dùng `http://IP_SERVER:PORT/v1` hoặc URL HTTPS thực tế của router. Kết nối được thực hiện từ máy chủ chạy module; `localhost` chỉ máy chủ đó. Router localhost/LAN cần đánh dấu **Cho phép quét router trên máy chủ hoặc mạng nội bộ**; HTTP còn cần xác nhận dùng kết nối không mã hóa.
+
+Quét chỉ gọi `GET /models`, không gửi yêu cầu chat, không lưu provider và không khởi động lại OpenCode. Danh sách được gộp với model trong biểu mẫu, giữ nguyên tên và lựa chọn đang có, bỏ mục trùng/không hợp lệ. Model mới được chọn sẵn; hãy bỏ chọn những model không cần rồi xác nhận **Lưu nhà cung cấp**. Danh sách từ router có thể gồm model chưa được tài khoản của bạn cấp quyền; quét thành công không xác nhận khả năng gọi từng model. API không hỗ trợ `/models` vẫn có thể khai báo model thủ công.
+
+Quét yêu cầu phiên đăng nhập, CSRF và mật khẩu OpenCode hiện tại; tối đa 6 lần mỗi phút, một yêu cầu quét tại một thời điểm. API key được gửi bằng Bearer từ máy chủ tới đúng Base URL đã nhập, không chuyển tiếp qua redirect. Module kiểm tra địa chỉ DNS và cố định IP cho kết nối để ngăn DNS rebinding; mặc định chặn địa chỉ nội bộ, luôn chặn metadata và địa chỉ đặc biệt. Có giới hạn thời gian, kích thước phản hồi và số model. Không phản chiếu nội dung lỗi từ nhà cung cấp về trình duyệt.
+
+Khi sửa provider cùng Base URL, quét có thể dùng khóa đã lưu bằng module mà không trả khóa về trình duyệt. Khóa dùng tham chiếu môi trường hoặc tệp bên ngoài module cần nhập lại để quét. Đổi Base URL cần nhập lại hoặc xóa khóa, kể cả khi chỉ quét model. Nếu cấu hình thay đổi trong lúc quét, kết quả bị từ chối để bạn tải lại danh sách.
+
+Khóa đã lưu không được điền lại vào biểu mẫu. Để trống API key khi sửa để giữ khóa hiện tại, nhập khóa mới để thay, hoặc đánh dấu **Xóa cấu hình API key hiện tại**. Khi đổi Base URL, cần nhập lại hoặc xóa khóa nhằm tránh tự gửi khóa cũ tới địa chỉ mới. HTTPS được ưu tiên; HTTP cần xác nhận riêng vì thông tin gửi tới nhà cung cấp không được mã hóa trên đường truyền. URL không nhận user/password, query, fragment hoặc biến tham chiếu từ biểu mẫu.
+
+Module dùng tài khoản chạy dịch vụ OpenCode để đọc và sửa cấu hình toàn cục `~/.config/opencode/opencode.json(c)`, có xét `XDG_CONFIG_HOME`; nếu dịch vụ khai báo `OPENCODE_CONFIG` thì dùng tệp đó. Khi có cả JSON và JSONC trong cùng thư mục, chọn JSONC theo thứ tự ưu tiên của OpenCode. Không cho trình duyệt chọn đường dẫn tệp hoặc gói thực thi. Cấu hình inline `OPENCODE_CONFIG_CONTENT`, tệp có liên kết, quyền không an toàn hoặc cấu trúc không được hỗ trợ sẽ bị từ chối thay vì ghi đè.
+
+Các phần cấu hình khác và chú thích JSONC không liên quan được giữ lại. Chỉ sửa provider dùng package cố định `@opencode/ai/providers/openai-compatible`; không tự đổi package hoặc sửa provider dùng kiểu khác. Provider có hơn 2000 model cần sửa bằng tệp để tránh bỏ sót model. Tệp cấu hình vẫn được giới hạn ở 1 MiB; nếu vượt giới hạn, module từ chối ghi và giữ cấu hình hiện tại. Không ghi đè ID đã được provider có sẵn hoặc cấu hình khác sử dụng. Nếu provider là model mặc định trong tệp đang sửa, cần đổi model mặc định trước khi xóa; khi lưu cũng không được bỏ chọn model mặc định đó. Cấu hình của dự án hoặc cấu hình quản trị cấp cao hơn vẫn có thể ưu tiên hơn cấu hình toàn cục.
+
+API key nằm trong `.web-login-secrets/PROVIDER_ID-RANDOM.key` bên cạnh tệp cấu hình, thư mục `0700`, tệp `0600`; cấu hình chỉ chứa tham chiếu `{file:...}`. Mỗi lần thay khóa dùng một tệp mới, sau đó mới đổi tham chiếu cấu hình, tránh dùng lẫn khóa khi chuyển endpoint. Tệp cấu hình sau khi sửa có quyền `0600`. Khóa và mật khẩu xác nhận không đi vào tham số dòng lệnh, log của module, phản hồi quản trị hoặc repository công khai. Khi đọc cấu hình/provider/model qua gateway, module che các trường nhạy cảm như `apiKey` và `Authorization`, bao gồm đường dẫn mã hóa. Không mở trực tiếp cổng backend ra Internet.
+
+Trước khi ghi, module sao lưu cấu hình cùng khóa liên quan bằng Git riêng tại `~/.local/state/opencode-web-login/provider-backup` của tài khoản OpenCode, có xét `XDG_STATE_HOME`; thư mục quyền `0700`, tệp sao lưu `0600`. Bản sao lưu có thể chứa khóa cũ nên phải được giữ riêng. Các tệp khóa cũ cũng có thể được giữ trong thư mục bí mật để không làm hỏng tham chiếu thủ công của cấu hình khác; xóa provider không xóa bản sao lưu. Không upload cấu hình, khóa hoặc bản sao lưu lên GitHub.
+
+Thao tác ghi dùng khóa hệ thống và thay tệp nguyên tử; kiểm tra revision để tránh ghi đè thay đổi từ tab khác hoặc terminal. Nếu có xung đột, bấm **Tải lại danh sách** rồi sửa lại. Sau khi ghi, module gọi chức năng tải lại cấu hình của OpenCode, kiểm tra danh sách provider/model và cố khôi phục nếu không áp dụng được. Tải lại cấu hình không khởi động lại tiến trình dịch vụ, nhưng có thể hủy các yêu cầu xác nhận đang chờ. Các thao tác provider, đổi mật khẩu và cập nhật dùng chung hàng đợi quản trị.
 
 ### 5. Thay đổi cấu hình sau khi cài
 
@@ -345,7 +417,7 @@ Khi được lệnh đổi phiên bản, cập nhật đồng bộ `package.json
 - `IP_SERVER` là tên mẫu để thay bằng IP của máy đích; `PORT` là cổng được chọn khi cài. Ví dụ tổng quát: `http://IP_SERVER:PORT/login`. Với cổng mặc định của module: `http://IP_SERVER:4096/login`.
 - Các lệnh dùng `127.0.0.1`/`::1` vì backend cần nghe ở loopback; đây là địa chỉ kỹ thuật dùng chung, không phải IP riêng của một máy chủ.
 - Domain trong ví dụ là domain dành cho tài liệu. Repository chính thức và tài khoản chủ repository trong đường dẫn GitHub là thông tin công khai cần cho clone/cập nhật; không phải tài khoản đăng nhập OpenCode.
-- Không đưa mật khẩu, token, cấu hình env thực tế, cấu hình quản trị `*-admin.json`, cơ sở dữ liệu/WAL/SHM, khóa riêng, log, ảnh chụp panel, bản sao lưu hoặc thư viện `node_modules` lên GitHub. `.gitignore` loại các tệp vận hành phổ biến; cần kiểm tra thêm tệp đã được theo dõi trong Git trước khi upload.
+- Không đưa mật khẩu, token, cấu hình env thực tế, cấu hình quản trị `*-admin.json`, cơ sở dữ liệu/WAL/SHM, khóa `security.sqlite.key`, khóa riêng, log, ảnh chụp panel, bản sao lưu hoặc thư viện `node_modules` lên GitHub. `.gitignore` loại các tệp vận hành phổ biến; cần kiểm tra thêm tệp đã được theo dõi trong Git trước khi upload.
 - Mật khẩu/token trong test là dữ liệu giả, chỉ dùng với dịch vụ và dữ liệu thử nghiệm riêng.
 - Quy tắc làm việc nội bộ chỉ lưu tại máy, không nằm trong danh sách tệp công khai hoặc gói cài đặt.
 - Tệp đã từng đưa lên GitHub có thể còn trong lịch sử Git hoặc gói phát hành cũ dù đã sửa bản hiện tại. Nếu phát hiện bí mật đã bị công khai, đổi/thu hồi bí mật đó trước rồi xử lý lịch sử và tài sản phát hành theo lệnh của chủ repository.
@@ -353,3 +425,7 @@ Khi được lệnh đổi phiên bản, cập nhật đồng bộ `package.json
 Bản sao lưu cấu hình trên máy chủ nằm ngoài repository công khai, có quyền truy cập riêng và có thể chứa thông tin đăng nhập. Không đính kèm bản sao lưu vào issue hoặc release.
 
 Test dùng cơ sở dữ liệu tạm và đáp án CAPTCHA cố định chỉ trong tiến trình test riêng. Bản chạy thực tế không có endpoint hoặc tùy chọn bỏ qua CAPTCHA. Các tài nguyên CAPTCHA và giấy phép font được lưu cùng mã nguồn.
+
+### Bảo trì bản dịch
+
+Danh sách ngôn ngữ và chiều hiển thị nằm trong `locales.json`; mỗi tệp `locales/CODE.json` chứa cùng bộ khóa. `vi.json` giữ câu gốc, `en.json` là bản dự phòng. Khi thêm hoặc sửa câu giao diện, cập nhật các tệp dịch tương ứng; giữ nguyên các biến `{0}`, `{1}` và đường dẫn/API kỹ thuật. Chạy `npm test` để kiểm tra đủ khóa, biến nội suy, tài nguyên cài đặt và hành vi đồng bộ ngôn ngữ. Không đưa thông tin riêng của máy chủ vào bản dịch.

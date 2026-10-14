@@ -17,3 +17,7 @@ backup/
 backups/
 logs/
 screenshots/
+opencode.json
+opencode.jsonc
+.web-login-secrets/
+provider-backup/

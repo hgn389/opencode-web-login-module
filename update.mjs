@@ -2,11 +2,22 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import languages from './locales.json' with { type: 'json' };
 
 export const repository = 'hgn389/opencode-web-login-module';
 export const openCodePackage = '@opencode/cli';
+export const legacyOpenCodePackage = 'opencode-ai';
 export const openCodePlatforms = ['linux-x64', 'linux-x64-baseline', 'linux-x64-musl', 'linux-x64-baseline-musl', 'linux-arm64', 'linux-arm64-musl', 'darwin-x64', 'darwin-x64-baseline', 'darwin-arm64', 'windows-x64', 'windows-x64-baseline', 'windows-arm64'].map(value => `${openCodePackage}-${value}`);
-export const moduleFiles = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'login-client.js', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt', 'admin-client.mjs', 'admin-service.mjs', 'admin.html', 'admin-ui.js', 'settings-hook.js', 'settings-hook.css', 'update.mjs'];
+export const legacyOpenCodePlatforms = openCodePlatforms.map(value => value.replace(openCodePackage, 'opencode'));
+export function supportedOpenCodeVersion(value) {
+  const version = versionParts(value);
+  return Boolean(version && !version.pre && version.value === value && (version.core[0] === 2 || version.core[0] === 1 && compareVersions(value, '1.18.20') >= 0));
+}
+export const packageForOpenCode = version => {
+  if (!supportedOpenCodeVersion(version)) throw new Error('Unsupported OpenCode version');
+  return versionParts(version).core[0] === 1 ? legacyOpenCodePackage : openCodePackage;
+};
+export const moduleFiles = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'login-client.js', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt', 'admin-client.mjs', 'admin-service.mjs', 'provider-models.mjs', 'admin.html', 'admin-ui.js', 'settings-hook.js', 'settings-hook.css', 'update.mjs', 'i18n-core.mjs', 'i18n-server.mjs', 'i18n-client.js', 'locales.json', ...languages.map(language => `locales/${language.code}.json`)];
 
 export function versionParts(value) {
   if (typeof value !== 'string') return;
@@ -39,14 +50,16 @@ export function compareVersions(a, b) {
 
 export function validateOpenCodePackage(value) {
   const version = versionParts(value?.version);
+  const packageName = supportedOpenCodeVersion(value?.version) ? packageForOpenCode(value.version) : null;
+  const platforms = packageName === legacyOpenCodePackage ? legacyOpenCodePlatforms : openCodePlatforms;
   const bins = value?.bin;
   const binary = bins?.opencode;
-  if (value?.name !== openCodePackage || !version || version.core[0] !== 2 || version.pre || version.value !== value.version ||
+  if (value?.name !== packageName || !version || !packageName ||
     !['bin/opencode', './bin/opencode', 'bin/opencode.exe', './bin/opencode.exe'].includes(binary) ||
     Object.entries(bins).some(([name, path]) => !['opencode', 'opencode2'].includes(name) || path !== binary) ||
     Object.keys(value.dependencies || {}).length || Object.keys(value.peerDependencies || {}).length ||
     [value.bundledDependencies, value.bundleDependencies].some(item => item !== undefined && item !== false && (!Array.isArray(item) || item.length)) || !value.optionalDependencies || !Object.keys(value.optionalDependencies).length ||
-    Object.entries(value.optionalDependencies).some(([name, target]) => !openCodePlatforms.includes(name) || target !== value.version)) throw new Error('Unsupported OpenCode package');
+    Object.entries(value.optionalDependencies).some(([name, target]) => !platforms.includes(name) || target !== value.version)) throw new Error('Unsupported OpenCode package');
   return { version: value.version, binary };
 }
 
@@ -70,18 +83,44 @@ export async function registryRead(url, limit = 1024 * 1024, { signal } = {}) {
   } finally { abort.abort(); }
 }
 
-export async function latestOpenCode({ signal, read = registryRead } = {}) {
-  const metadata = JSON.parse((await read('https://registry.npmjs.org/@opencode%2fcli/latest', 1024 * 1024, { signal })).toString());
+export async function openCodeRelease(version, { signal, read = registryRead } = {}) {
+  const packageName = packageForOpenCode(version), encoded = packageName.replace('/', '%2f');
+  const metadata = JSON.parse((await read(`https://registry.npmjs.org/${encoded}/${version}`, 1024 * 1024, { signal })).toString());
+  if (metadata.version !== version) throw new Error('OpenCode version mismatch');
+  return releaseFromMetadata(metadata);
+}
+function releaseFromMetadata(metadata) {
   const { version } = validateOpenCodePackage(metadata);
-  const assetURL = `https://registry.npmjs.org/@opencode/cli/-/cli-${version}.tgz`;
+  const packageName = packageForOpenCode(version);
+  const assetURL = `https://registry.npmjs.org/${packageName}/-/${packageName.split('/').at(-1)}-${version}.tgz`;
   const integrity = metadata.dist?.integrity;
   if (metadata.dist?.tarball !== assetURL || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(integrity || '')) throw new Error('Invalid OpenCode distribution');
-  return { version, assetURL, integrity, url: `https://www.npmjs.com/package/@opencode/cli/v/${version}` };
+  return { version, assetURL, integrity, url: `https://www.npmjs.com/package/${packageName}/v/${version}` };
+}
+export async function latestOpenCode({ signal, read = registryRead, major = 2 } = {}) {
+  if (![1, 2].includes(major)) throw new Error('Unsupported OpenCode major');
+  const packageName = major === 1 ? legacyOpenCodePackage : openCodePackage;
+  const metadata = JSON.parse((await read(`https://registry.npmjs.org/${packageName.replace('/', '%2f')}/latest`, 1024 * 1024, { signal })).toString());
+  return releaseFromMetadata(metadata);
+}
+export async function openCodeVersions({ read = download } = {}) {
+  const versions = new Set();
+  const signal = AbortSignal.timeout(8000);
+  for (let page = 1; page <= 5; page++) {
+    signal.throwIfAborted();
+    const tags = JSON.parse((await read(`https://api.github.com/repos/anomalyco/opencode/tags?per_page=100${page > 1 ? `&page=${page}` : ''}`, 1024 * 1024, { signal })).toString());
+    if (!Array.isArray(tags) || tags.length > 100) throw new Error('Invalid OpenCode version list');
+    for (const tag of tags) { const version = typeof tag.name === 'string' ? tag.name.replace(/^v/, '') : ''; if (supportedOpenCodeVersion(version)) versions.add(version); }
+    if (tags.length < 100 || tags.some(tag => tag.name === 'v1.18.20')) break;
+  }
+  return [...versions].sort((a, b) => compareVersions(b, a));
 }
 
 export async function downloadOpenCode(release, { signal, read = registryRead } = {}) {
   const version = versionParts(release?.version);
-  if (!version || version.core[0] !== 2 || version.pre || version.value !== release.version || release.assetURL !== `https://registry.npmjs.org/@opencode/cli/-/cli-${release.version}.tgz` || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(release.integrity || '')) throw new Error('Invalid OpenCode release');
+  if (!version || !supportedOpenCodeVersion(release.version)) throw new Error('Invalid OpenCode release');
+  const packageName = packageForOpenCode(release.version);
+  if (release.assetURL !== `https://registry.npmjs.org/${packageName}/-/${packageName.split('/').at(-1)}-${release.version}.tgz` || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(release.integrity || '')) throw new Error('Invalid OpenCode release');
   const archive = await read(release.assetURL, 1024 * 1024, { signal });
   if (!timingSafeEqual(createHash('sha512').update(archive).digest(), Buffer.from(release.integrity.slice(7), 'base64'))) throw new Error('OpenCode integrity mismatch');
   return archive;
@@ -95,11 +134,11 @@ export function selectRelease(releases, current, channel) {
   }).sort((a, b) => compareVersions(b.tag_name, a.tag_name))[0];
 }
 
-export async function download(url, limit = 2 * 1024 * 1024, { asset = false } = {}) {
+export async function download(url, limit = 2 * 1024 * 1024, { asset = false, signal } = {}) {
   const parsed = new URL(url);
   const permitted = asset ? ['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'] : ['api.github.com'];
   if (parsed.protocol !== 'https:' || !permitted.includes(parsed.hostname) || parsed.username || parsed.password || parsed.port) throw new Error('Invalid GitHub download URL');
-  const timeout = AbortSignal.timeout(15000);
+  const timeout = AbortSignal.any([AbortSignal.timeout(15000), ...(signal ? [signal] : [])]);
   let response = await fetch(url, { signal: timeout, redirect: 'manual', headers: { 'user-agent': 'OpenCode-Web-Login', accept: asset ? 'application/octet-stream' : 'application/vnd.github+json' } });
   for (let count = 0; [301, 302, 303, 307, 308].includes(response.status); count++) {
     if (count >= 3) { await response.body?.cancel(); throw new Error('Too many download redirects'); }

@@ -98,7 +98,7 @@ async function stop(child) {
       else await new Promise((resolve) => setTimeout(resolve, 30));
       const accepted = req.headers.authorization === auth(goodPassword) || (nativeAuthorized && req.headers.authorization === auth(nativeToken));
       res.writeHead(accepted ? 200 : 401, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(accepted ? { pid: 123, version: 'test' } : { message: 'Authentication required' }));
+      res.end(JSON.stringify(accepted ? { pid: 123, version: '2.0.1' } : { message: 'Authentication required' }));
     } else if (req.url === '/api/pair') {
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ code: 'test-code' }));
     } else if (req.url === '/auth/connect/test-code') {
@@ -234,7 +234,7 @@ test('CSRF supports multiple tabs, restart, recovery and rejects forged or missi
   let checks = 0;
   const backend = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
-    if (req.url === '/api/info') { checks++; res.writeHead(req.headers.authorization === auth(goodPassword) ? 200 : 401); res.end('{}'); }
+    if (req.url === '/api/info') { checks++; res.writeHead(req.headers.authorization === auth(goodPassword) ? 200 : 401); res.end('{"version":"2.0.1"}'); }
     else if (req.url === '/api/pair') res.end(JSON.stringify({ code: 'code' }));
     else res.end(JSON.stringify({ token: nativeToken }));
   });

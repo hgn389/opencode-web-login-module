@@ -33,7 +33,7 @@ test('real systemd password rotation preserves special characters and invalidate
     writeFileSync(script, `import http from 'node:http';
       http.createServer((req,res)=>{
         const good=req.headers.authorization==='Basic '+Buffer.from('opencode:'+process.env.OPENCODE_PASSWORD).toString('base64');
-        res.writeHead(good?200:401,{'content-type':'application/json'});res.end('{}');
+        res.writeHead(good?200:401,{'content-type':'application/json'});res.end('{"version":"2.0.1"}');
       }).listen(${port},'127.0.0.1');`);
     writeFileSync(backendUnit, `[Unit]\nDescription=Isolated password rotation test\n[Service]\nType=simple\nEnvironment=OPENCODE_PASSWORD=${original}\nExecStart=${process.execPath} ${script}\n`, { mode: 0o644 });
     writeFileSync(gatewayUnit, '[Unit]\nDescription=Isolated gateway fixture\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/true\n', { mode: 0o644 });

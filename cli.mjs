@@ -12,12 +12,12 @@ Usage:
   opencode-web-login revoke-sessions [--config /absolute/path/login.env]
   opencode-web-login install --opencode-bin /absolute/path/opencode [options]
 
-Requires Node.js 24+ and OpenCode v2 with /api/info, /api/pair and /auth/connect.
+Requires Node.js 24+ and OpenCode v2 or stable v1 from 1.18.20.
 Run "opencode-web-login install --help" for Linux service installation.
 `;
 
 async function doctor(config) {
-  if (!await protectedBackend(config)) throw new Error('Expected a password-protected OpenCode v2 backend returning JSON HTTP 401 at /api/info');
+  if (!await protectedBackend(config)) throw new Error('Expected a password-protected OpenCode v2 or v1 backend');
   console.log(JSON.stringify({ ok: true, node: process.versions.node, gateway: config.localOrigin,
     backend: { host: config.backendHost, port: config.backendPort, protected: true }, statePath: config.statePath,
     publicOrigins: config.publicOrigins }, null, 2));

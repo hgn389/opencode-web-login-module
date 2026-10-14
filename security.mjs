@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, chmodSync } from 'node:fs';
+import { createHash, createHmac, createCipheriv, createDecipheriv, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { mkdirSync, chmodSync, openSync, closeSync, readFileSync, writeFileSync, fstatSync, constants } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
@@ -21,6 +21,7 @@ export class SecurityStore {
     }
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     validateStateFiles(path);
+    this.credentialKeyPath = path + '.key';
     this.db = new DatabaseSync(path, { allowExtension: false });
     chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;
@@ -144,6 +145,37 @@ export class SecurityStore {
       SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM security_keys WHERE name = 'session_generation' AND value = ?)`)
       .run(hash(value), token, origin, now, now, now + SESSION_TTL, revision);
     return result.changes ? value : undefined;
+  }
+
+  credentialKey() {
+    let fd;
+    try {
+      try {
+        fd = openSync(this.credentialKeyPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+        writeFileSync(fd, randomBytes(32)); closeSync(fd); fd = undefined;
+      } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      fd = openSync(this.credentialKeyPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const info = fstatSync(fd);
+      if (!info.isFile() || info.uid !== process.getuid() || info.nlink !== 1 || info.mode & 0o077 || info.size !== 32) throw new Error('Unsafe session credential key');
+      return readFileSync(fd);
+    } finally { if (fd !== undefined) closeSync(fd); }
+  }
+
+  basicCredential(username, password, origin) {
+    const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', this.credentialKey(), iv);
+    cipher.setAAD(Buffer.from(origin));
+    const encrypted = Buffer.concat([cipher.update(`${username}:${password}`, 'utf8'), cipher.final()]);
+    return 'basic:' + Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url');
+  }
+
+  sessionAuthorization(session) {
+    if (!session.token.startsWith('basic:')) return 'Basic ' + Buffer.from('opencode:' + session.token).toString('base64');
+    const payload = Buffer.from(session.token.slice(6), 'base64url');
+    if (payload.length <= 28) throw new Error('Invalid session credential');
+    const cipher = createDecipheriv('aes-256-gcm', this.credentialKey(), payload.subarray(0, 12));
+    cipher.setAAD(Buffer.from(session.origin)); cipher.setAuthTag(payload.subarray(12, 28));
+    const value = Buffer.concat([cipher.update(payload.subarray(28)), cipher.final()]);
+    return 'Basic ' + value.toString('base64');
   }
 
   session(value, origin, touch = true) {

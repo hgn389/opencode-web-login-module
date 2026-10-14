@@ -154,7 +154,7 @@ test('global session revocation cancels login verification already in progress',
   const backend = http.createServer(async (req, res) => {
     if (req.url === '/api/info') { verified.resolve(); await resume.promise; }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(req.url === '/api/pair' ? { code: 'fixture' } : req.url === '/auth/connect/fixture' ? { token: 'native_fixture_token' } : {}));
+    res.end(JSON.stringify(req.url === '/api/pair' ? { code: 'fixture' } : req.url === '/auth/connect/fixture' ? { token: 'native_fixture_token' } : { version: '2.0.1' }));
   });
   backend.listen(0, '127.0.0.1'); await once(backend, 'listening');
   const port = await freePort(), origin = `http://127.0.0.1:${port}`;

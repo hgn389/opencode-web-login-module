@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, chmodSync, chownSync, symlinkSync, lstatSync, readlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, rmdirSync, chmodSync, chownSync, symlinkSync, lstatSync, readlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import http from 'node:http';
 import net from 'node:net';
@@ -41,7 +41,7 @@ function controllerFixture(overrides = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'native-controller-'));
   mkdirSync(join(directory, 'code')); writeFileSync(join(directory, 'code/package.json'), JSON.stringify({ version: '1.1.1-beta' }));
   const stateDir = join(directory, 'state');
-  const dependencies = { stateDir, password: () => password, nativeInfo: async () => ({ supported: true, version: '2.0.1', installedVersion: '2.0.1', pendingRestart: false }), nativeRelease: async () => release('2.0.2'), nativeLaunch: () => {}, ...overrides };
+  const dependencies = { stateDir, password: () => password, nativeInfo: async () => ({ supported: true, version: '2.0.1', installedVersion: '2.0.1', pendingRestart: false }), nativeRelease: async () => release('2.0.2'), nativeVersions: async () => [], nativeLaunch: () => {}, ...overrides };
   return { directory, stateDir, controller: createAdminController({ installDirectory: join(directory, 'code') }, dependencies), close: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
@@ -101,7 +101,7 @@ test('interrupted native jobs require recovery before another administrative cha
 });
 
 test('native web APIs enforce session, origin, CSRF and acknowledgement without clearing failed attempts on checks', async () => {
-  const f = controllerFixture();
+  const f = controllerFixture({ nativeVersions: async () => ['2.0.0'], nativeSelectedRelease: async version => release(version) });
   const socket = join(f.directory, 'helper.sock'); let forwarded;
   const helper = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -125,6 +125,8 @@ test('native web APIs enforce session, origin, CSRF and acknowledgement without 
     const options = { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-web-login-csrf': status.csrf }, body: '{}' };
     assert.equal((await request('/web-login/api/opencode-check', { ...options, headers: { ...options.headers, origin: 'https://attacker.example' } })).status, 403);
     assert.equal((await request('/web-login/api/opencode-update', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
+    assert.equal((await request('/web-login/api/opencode-install', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
+    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '2.0.0;id' }) })).status, 422);
     for (let i = 0; i < 3; i++) store.fail('127.0.0.1');
     assert.equal((await request('/web-login/api/opencode-check', options)).status, 200); assert.equal(store.state('127.0.0.1').failures, 3);
     assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ password: 'wrong', acknowledge: true }) })).status, 401); assert.equal(store.state('127.0.0.1').failures, 4);
@@ -132,6 +134,10 @@ test('native web APIs enforce session, origin, CSRF and acknowledgement without 
     assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '999.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
     assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'password']); assert.equal(store.state('127.0.0.1').failures, 0);
     assert(store.session(session, origin), 'An OpenCode update must not revoke the unchanged login credential');
+    writeFileSync(join(f.stateDir, 'job.json'), JSON.stringify({ type: 'opencode-update', phase: 'failed', recoveryRequired: false }), { mode: 0o600 });
+    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '2.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
+    assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'password', 'version']);
+    assert.equal(JSON.parse(readFileSync(join(f.stateDir, 'job.json'))).version, '2.0.0');
   } finally {
     store.close(); await gateway.close(); helper.closeAllConnections(); backend.closeAllConnections(); await Promise.all([new Promise(done => helper.close(done)), new Promise(done => backend.close(done))]); f.close();
   }
@@ -147,7 +153,9 @@ function rootFixture() {
   const data = join(directory, 'data'); mkdirSync(data, { mode: 0o700 }); chownSync(data, 65534, 65534);
   const database = join(data, 'opencode.db'); const db = new DatabaseSync(database); db.exec('CREATE TABLE fixture(value TEXT); INSERT INTO fixture VALUES (\'before\')'); db.close(); chmodSync(database, 0o600); chownSync(database, 65534, 65534);
   const module = join(directory, 'module'); mkdirSync(module); writeFileSync(join(module, 'package.json'), JSON.stringify({ version: '1.1.1-beta' }));
-  const config = { name: 'oc-native-fixture', opencode: join(prefix, 'bin/opencode'), node: process.execPath, installDirectory: module, backendService: 'oc-native-fixture-backend.service', gateway: {} };
+  const name = 'oc-native-' + randomBytes(4).toString('hex');
+  const config = { name, opencode: join(prefix, 'bin/opencode'), node: process.execPath, installDirectory: module, backendService: `${name}-backend.service`, gateway: {} };
+  assert.equal(lstatSync(`/etc/systemd/system/${config.backendService}.d`, { throwIfNoEntry: false }), undefined);
   const context = { user: 'nobody', uid: 65534, gid: 65534, databases: [database], sessionIds: ['fixture-session'] };
   return { directory, prefix, code, database, config, context, close: () => rmSync(directory, { recursive: true, force: true }) };
 }
@@ -171,21 +179,23 @@ test('native snapshots preserve npm binaries, links and SQLite data using the ba
   } finally { f.close(); }
 });
 
-for (const failure of [null, 'install', 'health', 'recovery', 'preflight', 'symlink', 'diagnostics']) test(`native worker ${failure || 'success'} stages before stopping and restores real files/data on failure`, { skip: process.getuid?.() !== 0 }, async () => {
+for (const scenario of [null, 'install', 'health', 'recovery', 'preflight', 'symlink', 'diagnostics', 'downgrade', 'downgrade-health']) test(`native worker ${scenario || 'success'} stages before stopping and restores real files/data on failure`, { skip: process.getuid?.() !== 0 }, async () => {
+  const downgrade = scenario?.startsWith('downgrade'), failure = downgrade ? scenario === 'downgrade-health' ? 'health' : null : scenario;
+  const targetVersion = downgrade ? '2.0.0' : '2.0.2';
   const f = rootFixture(), stateDir = join(f.directory, 'state'); mkdirSync(stateDir, { mode: 0o700 });
-  const jobPath = join(stateDir, 'job.json'), requested = release('2.0.2');
-  writeFileSync(jobPath, JSON.stringify({ type: 'opencode-update', phase: 'starting', version: '2.0.2', fromVersion: '2.0.1', release: requested, passwordRevision: createHash('sha256').update(password).digest('hex'), started: Date.now() }), { mode: 0o600 });
+  const jobPath = join(stateDir, 'job.json'), requested = release(targetVersion);
+  writeFileSync(jobPath, JSON.stringify({ type: 'opencode-update', phase: 'starting', version: targetVersion, explicitTarget: Boolean(downgrade), fromVersion: '2.0.1', release: requested, passwordRevision: createHash('sha256').update(password).digest('hex'), started: Date.now() }), { mode: 0o600 });
   const calls = []; let failedHealth = false;
   const workerRun = async (binary, args, options = {}) => {
     if (binary === 'systemctl') { calls.push(args[0]); return ''; }
     if (binary === f.config.node && args.includes('install')) {
       assert(args.includes('--ignore-scripts')); assert.equal(options.env.npm_config_registry, 'https://registry.npmjs.org');
       if (!args.includes('--global')) {
-        calls.push('stage'); const staging = args[args.indexOf('--prefix') + 1]; const metadata = pkg('2.0.2');
+        calls.push('stage'); const staging = args[args.indexOf('--prefix') + 1]; const metadata = pkg(targetVersion);
         const code = join(staging, 'node_modules/@opencode/cli'); mkdirSync(code, { recursive: true }); writeFileSync(join(code, 'package.json'), JSON.stringify(metadata));
-        for (const name of Object.keys(metadata.optionalDependencies)) { const platform = join(staging, 'node_modules', name); mkdirSync(join(platform, 'bin'), { recursive: true }); writeFileSync(join(platform, 'package.json'), JSON.stringify({ name, version: '2.0.2' })); writeFileSync(join(platform, 'bin/opencode'), 'new-native-binary', { mode: 0o755 }); }
+        for (const name of Object.keys(metadata.optionalDependencies)) { const platform = join(staging, 'node_modules', name); mkdirSync(join(platform, 'bin'), { recursive: true }); writeFileSync(join(platform, 'package.json'), JSON.stringify({ name, version: targetVersion })); writeFileSync(join(platform, 'bin/opencode'), 'new-native-binary', { mode: 0o755 }); }
       } else {
-        calls.push('install'); writeFileSync(join(f.code, 'package.json'), JSON.stringify(pkg('2.0.2'))); writeFileSync(join(f.code, 'bin/opencode.exe'), 'placeholder');
+        calls.push('install'); writeFileSync(join(f.code, 'package.json'), JSON.stringify(pkg(targetVersion))); writeFileSync(join(f.code, 'bin/opencode.exe'), 'placeholder');
         const db = new DatabaseSync(f.database); db.exec("INSERT INTO fixture VALUES ('migration')"); db.close();
         if (failure === 'symlink') {
           writeFileSync(join(f.directory, 'unrelated-file'), 'must-remain-unchanged');
@@ -195,7 +205,7 @@ for (const failure of [null, 'install', 'health', 'recovery', 'preflight', 'syml
       }
       return '';
     }
-    if (binary === 'runuser' && args.at(-1) === '--version') return 'opencode v2.0.2';
+    if (binary === 'runuser' && args.at(-1) === '--version') return 'opencode v' + targetVersion;
     return run(binary, args, options);
   };
   try {
@@ -215,11 +225,23 @@ for (const failure of [null, 'install', 'health', 'recovery', 'preflight', 'syml
     assert(!JSON.stringify(job).includes(password));
     if (failure === 'preflight') assert.deepEqual(calls, []);
     else assert(calls.indexOf('stage') < calls.indexOf('stop'));
-    const expected = failure ? '2.0.1' : '2.0.2'; assert.equal(JSON.parse(readFileSync(join(f.code, 'package.json'))).version, expected);
+    const expected = failure ? '2.0.1' : targetVersion; assert.equal(JSON.parse(readFileSync(join(f.code, 'package.json'))).version, expected);
     assert.equal(readFileSync(join(f.code, 'bin/opencode.exe'), 'utf8'), failure ? 'old-native-binary' : 'new-native-binary');
     if (failure === 'symlink') assert.equal(readFileSync(join(f.directory, 'unrelated-file'), 'utf8'), 'must-remain-unchanged');
+    if (downgrade) {
+      const dropin = `/etc/systemd/system/${f.config.backendService}.d/96-web-login-manual-version.conf`;
+      if (failure) assert.equal(lstatSync(dropin, { throwIfNoEntry: false }), undefined);
+      else assert(readFileSync(dropin, 'utf8').includes('OPENCODE_DISABLE_AUTOUPDATE=1'));
+    }
     if (failure) { const db = new DatabaseSync(f.database); assert.equal(db.prepare('SELECT COUNT(*) AS count FROM fixture').get().count, 1); db.close(); }
-  } finally { process.exitCode = 0; f.close(); }
+  } finally {
+    if (downgrade) {
+      rmSync(`/etc/systemd/system/${f.config.backendService}.d/96-web-login-manual-version.conf`, { force: true });
+      // Remove only the empty fixture directory; never recursively remove service configuration.
+      try { rmdirSync(`/etc/systemd/system/${f.config.backendService}.d`); } catch {}
+    }
+    process.exitCode = 0; f.close();
+  }
 });
 
 test('native worker and recovery share an exclusive lock without overwriting an active job', { skip: process.getuid?.() !== 0 }, async () => {

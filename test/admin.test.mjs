@@ -137,7 +137,7 @@ test('password rotation restores previous files and services when restart fails'
     assert(calls.some(x => x[0] === 'restart' && x[1] === `${name}.service`));
     assert(existsSync(join(backup, '.git')));
     let revoked = false;
-    await rotatePassword(config, nextPassword, { run: () => {}, revoke: () => { revoked = true; }, probe: async () => ({ status: 200, headers: { 'content-type': 'application/json' } }) });
+    await rotatePassword(config, nextPassword, { run: () => {}, revoke: () => { revoked = true; }, probe: async () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"version":"2.0.1"}' }) });
     assert(revoked, 'Session invalidation must also happen in the privileged rotation task');
     assert(readFileSync(passwordFile, 'utf8').includes('OPENCODE_SERVER_PASSWORD='));
   } finally {

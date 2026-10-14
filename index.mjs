@@ -4,8 +4,9 @@ import { networkInterfaces } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto';
 import { SecurityStore } from './security.mjs';
-import { readResponse } from './http-client.mjs';
+import { readResponse, backendInfo } from './http-client.mjs';
 import { adminCall } from './admin-client.mjs';
+import { bootstrap, languages, localeCatalog, localizeHTML, requestLocale, translate } from './i18n-server.mjs';
 
 import { normalizeConfig } from './config.mjs';
 
@@ -34,6 +35,7 @@ export function createLoginServer(options = {}) {
   const template = readFileSync(new URL('./login.html', import.meta.url), 'utf8');
   const { version: moduleVersion } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
   const loginScript = readFileSync(new URL('./login-client.js', import.meta.url), 'utf8');
+  const localeAssets = new Map(['i18n-client.js', 'i18n-core.mjs'].map(file => ['/login/' + file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const adminPage = readFileSync(new URL('./admin.html', import.meta.url), 'utf8').replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
   const adminAssets = new Map(['admin-ui.js', 'settings-hook.js', 'settings-hook.css'].map(file => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const state = new SecurityStore(config.statePath);
@@ -138,11 +140,12 @@ export function createLoginServer(options = {}) {
     if (!locked && state.state(ctx.ip).failures >= 5) {
       const refresh = new URL(req.url, ctx.origin).searchParams.get('refresh') === '1';
       if (refresh || !state.image(csrf, ctx.ip)) state.challenge(csrf, ctx.ip);
-      captcha = '<div class="captcha"><label for="captcha">Mã xác minh</label><img src="/login/captcha" width="270" height="86" alt="Mã xác minh gồm 6 ký tự trong ảnh"><input id="captcha" name="captcha" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" required aria-describedby="captcha-help"><small id="captcha-help">Nhập 6 ký tự trong ảnh. <a href="/login?refresh=1&amp;next=' + encodeURIComponent(safeNext(next, ctx)) + '">Đổi mã</a></small></div>';
+      captcha = '<div class="captcha"><label for="captcha"><span data-i18n="m224">Mã xác minh</span></label><img src="/login/captcha" width="270" height="86" alt="Mã xác minh gồm 6 ký tự trong ảnh" data-i18n-alt="m225"><input id="captcha" name="captcha" type="text" dir="ltr" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" required aria-describedby="captcha-help"><small id="captcha-help"><span data-i18n="m226">Nhập 6 ký tự trong ảnh.</span> <a href="/login?refresh=1&amp;next=' + encodeURIComponent(safeNext(next, ctx)) + '"><span data-i18n="m227">Đổi mã</span></a></small></div>';
     }
-    const body = template.replace('{{MESSAGE}}', escapeHtml(message)).replace('{{CSRF}}', csrf)
-      .replace('{{NEXT}}', escapeHtml(safeNext(next, ctx))).replace('{{CAPTCHA}}', captcha)
-      .replace('{{FORM_STATE}}', locked ? 'disabled' : '').replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
+    const locale = requestLocale(req);
+    const body = localizeHTML(template, locale).replace('{{MESSAGE}}', escapeHtml(translate(message, locale))).replace('{{MESSAGE_SOURCE}}', escapeHtml(message)).replace('{{CSRF}}', csrf)
+      .replace('{{NEXT}}', escapeHtml(safeNext(next, ctx))).replace('{{CAPTCHA}}', localizeHTML(captcha, locale))
+      .replace('{{FORM_STATE}}', locked ? 'disabled' : '').replace('{{LANGUAGE_OPTIONS}}', languages.map(language => `<option value="${language.code}"${language.code === locale ? ' selected' : ''}>${escapeHtml(language.name)}</option>`).join('')).replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
     res.writeHead(status, {
       ...responseHeaders(ctx),
       'content-security-policy': "default-src 'none'; img-src 'self'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
@@ -208,7 +211,7 @@ export function createLoginServer(options = {}) {
       if (!username || username.includes(':') || username.length > 128 || !password || password.length > 2048) check = { status: 401 };
       else {
         const authorization = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-        check = await backend('/api/info', 'GET', { authorization });
+        check = await backendInfo(config, authorization, { signal: shutdown.signal });
       }
       if (check.status === 401 || check.status === 403) {
         const result = state.fail(ctx.ip);
@@ -218,14 +221,20 @@ export function createLoginServer(options = {}) {
       }
       if (check.status !== 200) throw new Error('Backend unavailable');
       const authorization = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-      const pairing = await backend('/api/pair', 'POST', { authorization });
-      if (pairing.status !== 200) throw new Error('Pairing unavailable');
-      const { code } = JSON.parse(pairing.body);
-      if (typeof code !== 'string' || !code) throw new Error('Invalid pairing response');
-      const session = await backend(`/auth/connect/${encodeURIComponent(code)}`, 'GET', { accept: 'application/json' });
-      if (session.status !== 200) throw new Error('Session unavailable');
-      const { token } = JSON.parse(session.body);
-      if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
+      let token;
+      if (check.major === 1) {
+        if ((await backend('/global/health')).status !== 401) throw new Error('Backend must require authentication');
+        token = state.basicCredential(username, password, ctx.origin);
+      } else {
+        const pairing = await backend('/api/pair', 'POST', { authorization });
+        if (pairing.status !== 200) throw new Error('Pairing unavailable');
+        const { code } = JSON.parse(pairing.body);
+        if (typeof code !== 'string' || !code) throw new Error('Invalid pairing response');
+        const session = await backend(`/auth/connect/${encodeURIComponent(code)}`, 'GET', { accept: 'application/json' });
+        if (session.status !== 200) throw new Error('Session unavailable');
+        ({ token } = JSON.parse(session.body));
+        if (typeof token !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(token)) throw new Error('Invalid session response');
+      }
       if (await administrationBusy()) return page(req, res, ctx, 503, 'OpenCode đang xử lý tác vụ quản trị hoặc cần khôi phục. Vui lòng chờ rồi đăng nhập lại.', next);
       state.revoke(cookies(req)[ctx.cookie]);
       const value = state.createSession(token, ctx.origin, revision);
@@ -245,7 +254,7 @@ export function createLoginServer(options = {}) {
     const result = endToEndHeaders(req.headers);
     for (const key of ['authorization', 'proxy-authorization', 'cookie', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'forwarded', 'x-real-ip']) delete result[key];
     result.host = new URL(ctx.origin).host;
-    if (session) result.authorization = 'Basic ' + Buffer.from('opencode:' + session.token).toString('base64');
+    if (session) result.authorization = state.sessionAuthorization(session);
     if (websocket) { result.connection = 'Upgrade'; result.upgrade = 'websocket'; }
     return result;
   }
@@ -274,9 +283,11 @@ export function createLoginServer(options = {}) {
   }
   function proxy(req, res, ctx, session) {
     const path = upstreamPath(req, ctx);
+    const normalized = canonicalPath(new URL(path, ctx.origin).pathname);
+    const privateConfig = session && req.method === 'GET' && ['/api/provider', '/api/model', '/api/config', '/provider', '/model', '/config'].some(prefix => normalized === prefix || normalized.startsWith(prefix + '/'));
     const navigation = session && req.method === 'GET' && !path.startsWith('/api/') && req.headers.accept?.includes('text/html');
     const requestHeaders = upstreamHeaders(req, ctx, session);
-    if (navigation) {
+    if (navigation || privateConfig) {
       requestHeaders['accept-encoding'] = 'identity';
       delete requestHeaders['if-none-match']; delete requestHeaders['if-modified-since'];
     }
@@ -291,6 +302,26 @@ export function createLoginServer(options = {}) {
         catch { response.destroy(); res.destroy(); return; }
         result['set-cookie'] = cookie(ctx, ctx.cookie, '', 0);
       }
+      if (privateConfig && response.statusCode === 200) {
+        const timer = setTimeout(() => response.destroy(new Error('Configuration response timeout')), 15000); timer.unref();
+        try {
+          if (response.headers['content-encoding']) throw new Error('Unexpected configuration encoding');
+          let size = 0; const chunks = [];
+          for await (const chunk of response) { size += chunk.length; if (size > 4 * 1024 * 1024) throw new Error('Configuration response too large'); chunks.push(chunk); }
+          const redact = (value, depth = 0) => {
+            if (depth > 64) throw new Error('Configuration response too deep');
+            if (Array.isArray(value)) return value.map(item => redact(item, depth + 1));
+            if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /^(?:apikey|authorization|proxyauthorization|xapikey|xauthtoken|accesstoken|refreshtoken|token|password|clientsecret|secretkey|secret|cookie|setcookie)$/i.test(key.replace(/[-_]/g, '')) ? '[redacted]' : redact(item, depth + 1)]));
+            return value;
+          };
+          const body = JSON.stringify(redact(JSON.parse(Buffer.concat(chunks).toString())));
+          for (const key of ['content-length', 'etag', 'content-md5', 'digest']) delete result[key];
+          result['content-type'] = 'application/json; charset=utf-8';
+          res.writeHead(200, result); res.end(body);
+        } catch { if (!res.headersSent) reject(res, ctx, 502, 'Không tải được cấu hình OpenCode an toàn. Vui lòng thử lại.'); else res.destroy(); }
+        finally { clearTimeout(timer); }
+        return;
+      }
       if (navigation && response.statusCode === 200 && response.headers['content-type']?.includes('text/html') && !response.headers['content-encoding']) {
         const timer = setTimeout(() => response.destroy(new Error('HTML response timeout')), 15000);
         timer.unref();
@@ -303,7 +334,7 @@ export function createLoginServer(options = {}) {
             chunks.push(chunk);
           }
           const html = Buffer.concat(chunks).toString();
-          const hook = '<link rel="stylesheet" href="/web-login/settings-hook.css"><script src="/web-login/settings-hook.js" defer></script>';
+          const hook = '<link rel="stylesheet" href="/web-login/settings-hook.css"><script type="module" src="/web-login/settings-hook.js"></script>';
           const body = html.includes('</head>') ? html.replace('</head>', hook + '</head>') : html + hook;
           for (const key of ['content-length', 'etag', 'content-md5', 'digest']) delete result[key];
           res.writeHead(200, result); res.end(body);
@@ -339,16 +370,16 @@ export function createLoginServer(options = {}) {
       res.writeHead(200, { ...responseHeaders(ctx), 'content-type': url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8' });
       res.end(req.method === 'HEAD' ? undefined : asset); return;
     }
-    if (['/web-login/password', '/web-login/updates', '/web-login/opencode'].includes(url.pathname) && ['GET', 'HEAD'].includes(req.method)) {
+    if (['/web-login/password', '/web-login/updates', '/web-login/opencode', '/web-login/providers'].includes(url.pathname) && ['GET', 'HEAD'].includes(req.method)) {
       res.writeHead(200, { ...responseHeaders(ctx), 'x-frame-options': 'SAMEORIGIN', 'content-type': 'text/html; charset=utf-8',
         'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'" });
-      res.end(req.method === 'HEAD' ? undefined : adminPage); return;
+      res.end(req.method === 'HEAD' ? undefined : localizeHTML(adminPage, requestLocale(req))); return;
     }
     const operation = url.pathname.slice('/web-login/api/'.length);
-    if (!url.pathname.startsWith('/web-login/api/') || !['status', 'check', 'password', 'preferences', 'update', 'opencode-status', 'opencode-check', 'opencode-update'].includes(operation)) return send(404, { message: 'Không tìm thấy trang.' });
+    if (!url.pathname.startsWith('/web-login/api/') || !['status', 'check', 'password', 'preferences', 'update', 'opencode-status', 'opencode-check', 'opencode-update', 'opencode-install', 'providers-status', 'provider-save', 'provider-remove', 'provider-models'].includes(operation)) return send(404, { message: 'Không tìm thấy trang.' });
     if (!state.allowRequest(ctx.ip, 'admin', 60)) return send(429, { message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.' });
     if (req.headers['x-opencode-login'] !== '1' || req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== ctx.origin)) return send(403, { message: 'Yêu cầu không hợp lệ.' });
-    if (['status', 'opencode-status'].includes(operation)) {
+    if (['status', 'opencode-status', 'providers-status'].includes(operation)) {
       if (req.method !== 'GET') return send(405, { message: 'Phương thức không hợp lệ.' });
       if (!config.adminSocket) return send(200, { available: false, message: 'Chưa bật dịch vụ quản trị. Cài lại bằng bộ cài Linux để sử dụng.', csrf: adminCSRF(ctx, session) });
       const result = await adminCall(config.adminSocket, operation, {}, { signal: shutdown.signal });
@@ -369,7 +400,7 @@ export function createLoginServer(options = {}) {
       const chunks = [];
       for await (const chunk of req.iterator({ destroyOnReturn: false })) {
         size += chunk.length;
-        if (size > 8192) { req.resume(); return send(413, { message: 'Dữ liệu quá lớn.' }); }
+        if (size > (operation === 'provider-save' ? 2 * 1024 * 1024 : ['provider-remove', 'provider-models'].includes(operation) ? 32768 : 8192)) { req.resume(); return send(413, { message: 'Dữ liệu quá lớn.' }); }
         chunks.push(chunk);
       }
       let fields;
@@ -377,13 +408,15 @@ export function createLoginServer(options = {}) {
       catch { return send(400, { message: 'Dữ liệu không hợp lệ.' }); }
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return send(400, { message: 'Dữ liệu không hợp lệ.' });
       const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel', 'acknowledge'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
+      if (operation === 'opencode-install') picked.version = fields.version;
+      if (['provider-save', 'provider-remove', 'provider-models'].includes(operation)) { picked.revision = fields.revision; if (operation === 'provider-remove') picked.id = fields.id; else picked.provider = fields.provider; }
       const result = await adminCall(config.adminSocket, operation, picked, { signal: shutdown.signal });
       console.log(JSON.stringify({ event: 'web_admin_request', operation, ip: ctx.ip, status: result.status, at: new Date().toISOString() }));
       if (result.status === 401) {
         const failed = state.fail(ctx.ip);
         if (failed.failures >= 5) { state.revoke(cookies(req)[ctx.cookie]); result.loginRequired = true; }
       }
-      else if ([200, 202].includes(result.status) && !['check', 'opencode-check'].includes(operation)) state.succeed(ctx.ip);
+      else if ([200, 202].includes(result.status) && !['check', 'opencode-check', 'provider-models'].includes(operation)) state.succeed(ctx.ip);
       if (result.status === 202 && operation === 'password') state.revokeAll();
       return send(result.status, result);
     } finally { state.end(ctx.ip); }
@@ -402,6 +435,14 @@ export function createLoginServer(options = {}) {
     try {
       const url = new URL(req.url, ctx.origin);
       if (url.origin !== ctx.origin) return reject(res, ctx, 400, 'Yêu cầu không hợp lệ.');
+      if (localeAssets.has(url.pathname) || url.pathname === '/login/locales' || /^\/login\/locales\/[a-z]{2,3}\.json$/.test(url.pathname)) {
+        if (!['GET', 'HEAD'].includes(req.method)) return reject(res, ctx, 405, 'Phương thức không hợp lệ.');
+        const javascript = localeAssets.has(url.pathname);
+        const body = javascript ? localeAssets.get(url.pathname) : url.pathname === '/login/locales' ? bootstrap : localeCatalog(url.pathname.split('/').at(-1).slice(0, -5));
+        if (body === undefined) return reject(res, ctx, 404, 'Không tìm thấy trang.');
+        res.writeHead(200, { ...responseHeaders(ctx), 'content-type': javascript ? 'text/javascript; charset=utf-8' : 'application/json; charset=utf-8' });
+        res.end(req.method === 'HEAD' ? undefined : body); return;
+      }
       if (url.pathname === '/login/client.js' && ['GET', 'HEAD'].includes(req.method)) {
         res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'text/javascript; charset=utf-8' });
         res.end(req.method === 'HEAD' ? undefined : loginScript);
@@ -445,8 +486,8 @@ export function createLoginServer(options = {}) {
       if (url.pathname === '/logout') {
         if (!session) return redirect(res, ctx, '/login');
         if (req.method === 'GET') {
-          res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'" });
-          res.end('<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Đăng xuất · OpenCode</title><style>body{font:16px/1.5 system-ui;margin:0;min-height:100dvh;display:grid;place-items:center;background:#f4f4f5;color:#222;padding:24px;box-sizing:border-box}main{max-width:380px}button{font:inherit;padding:12px 24px;border:0;border-radius:8px;background:#222;color:#fff;cursor:pointer}a{display:inline-block;margin-top:20px;color:#555}</style><main><h1>Đăng xuất</h1><p>Kết thúc phiên đăng nhập trên thiết bị này?</p><form method="post" action="/logout"><button type="submit">Đăng xuất</button></form><a href="/">Quay lại OpenCode</a></main></html>');
+          res.writeHead(200, { ...responseHeaders(ctx), 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'" });
+          res.end(localizeHTML('<!doctype html><html lang="vi" data-web-login-page><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title data-i18n="m217">Đăng xuất</title><script type="module" src="/login/i18n-client.js"></script><style>body{font:16px/1.5 system-ui;margin:0;min-height:100dvh;display:grid;place-items:center;background:#f4f4f5;color:#222;padding:24px;box-sizing:border-box}main{max-width:380px}button{font:inherit;padding:12px 24px;border:0;border-radius:8px;background:#222;color:#fff;cursor:pointer}a{display:inline-block;margin-top:20px;color:#555}</style><main><h1><span data-i18n="m217">Đăng xuất</span></h1><p><span data-i18n="m218">Kết thúc phiên đăng nhập trên thiết bị này?</span></p><form method="post" action="/logout"><button type="submit"><span data-i18n="m217">Đăng xuất</span></button></form><a href="/"><span data-i18n="m219">Quay lại OpenCode</span></a></main></html>', requestLocale(req)));
           return;
         }
         if (req.method !== 'POST' || req.headers.origin !== ctx.origin) return reject(res, ctx, 403, 'Yêu cầu không hợp lệ.');
