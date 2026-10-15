@@ -280,5 +280,8 @@
   "m279": "Mot de passe actuel OpenCode à confirmer",
   "m280": "J'accepte de recharger la configuration OpenCode ; les demandes d’approbation en attente peuvent être annulées.",
   "m281": "Enregistrer le fournisseur",
-  "m282": "Supprimer le fournisseur"
+  "m282": "Supprimer le fournisseur",
+  "m283": "Fournisseurs connectés",
+  "m284": "Aucun fournisseur pour le moment.",
+  "m285": "Modifier"
 }

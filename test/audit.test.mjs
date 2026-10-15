@@ -43,7 +43,7 @@ test('disabling automatic updates cancels a check already in progress', async ()
   } finally { fixture.close(); }
 });
 
-test('manual updates revalidate the password after an asynchronous release check', async () => {
+test('manual updates reject credential rotation during an asynchronous release check without password re-entry', async () => {
   const pending = deferred();
   let actualPassword = password, launches = 0;
   const newPassword = 'isolated-audit-replacement-password';
@@ -51,8 +51,8 @@ test('manual updates revalidate the password after an asynchronous release check
     rotate: async value => { actualPassword = value; }, launch: () => { launches++; } });
   try {
     const controller = fixture.create();
-    const updating = controller.call({ operation: 'update', password });
-    assert.equal((await controller.call({ operation: 'password', password, newPassword, confirmPassword: newPassword })).status, 202);
+    const updating = controller.call({ operation: 'update', acknowledge: true });
+    assert.equal((await controller.call({ operation: 'password', acknowledge: true, newPassword, confirmPassword: newPassword })).status, 202);
     await sleep(650);
     assert.equal(actualPassword, newPassword);
     pending.resolve(release);

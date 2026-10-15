@@ -407,16 +407,23 @@ export function createLoginServer(options = {}) {
       try { fields = JSON.parse(Buffer.concat(chunks).toString()); }
       catch { return send(400, { message: 'Dữ liệu không hợp lệ.' }); }
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return send(400, { message: 'Dữ liệu không hợp lệ.' });
-      const picked = Object.fromEntries(['password', 'newPassword', 'confirmPassword', 'automatic', 'channel', 'acknowledge'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
+      const currentSession = state.session(cookies(req)[ctx.cookie], ctx.origin, false);
+      if (!currentSession || currentSession.id !== session.id || state.state(ctx.ip).blocked) return send(401, { message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', loginRequired: true });
+      const verification = await readResponse({ hostname: backendHost, port: backendPort, path: session.token.startsWith('basic:') ? '/global/health' : '/api/info', headers: { authorization: state.sessionAuthorization(session) } }, { timeout: 3000, limit: 65536, signal: shutdown.signal });
+      if ([401, 403].includes(verification.status)) {
+        state.revoke(cookies(req)[ctx.cookie]);
+        return send(401, { message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', loginRequired: true });
+      }
+      if (verification.status !== 200) return send(503, { message: 'OpenCode tạm thời không khả dụng. Vui lòng thử lại.' });
+      if (!state.session(cookies(req)[ctx.cookie], ctx.origin, false) || state.state(ctx.ip).blocked) return send(401, { message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', loginRequired: true });
+      const picked = Object.fromEntries(['newPassword', 'confirmPassword', 'automatic', 'channel', 'acknowledge'].filter(key => Object.hasOwn(fields, key)).map(key => [key, fields[key]]));
       if (operation === 'opencode-install') picked.version = fields.version;
       if (['provider-save', 'provider-remove', 'provider-models'].includes(operation)) { picked.revision = fields.revision; if (operation === 'provider-remove') picked.id = fields.id; else picked.provider = fields.provider; }
       const result = await adminCall(config.adminSocket, operation, picked, { signal: shutdown.signal });
       console.log(JSON.stringify({ event: 'web_admin_request', operation, ip: ctx.ip, status: result.status, at: new Date().toISOString() }));
       if (result.status === 401) {
-        const failed = state.fail(ctx.ip);
-        if (failed.failures >= 5) { state.revoke(cookies(req)[ctx.cookie]); result.loginRequired = true; }
+        state.revoke(cookies(req)[ctx.cookie]); result.loginRequired = true;
       }
-      else if ([200, 202].includes(result.status) && !['check', 'opencode-check', 'provider-models'].includes(operation)) state.succeed(ctx.ip);
       if (result.status === 202 && operation === 'password') state.revokeAll();
       return send(result.status, result);
     } finally { state.end(ctx.ip); }

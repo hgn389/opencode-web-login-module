@@ -51,9 +51,8 @@ test('selected installs authenticate, require confirmation, restrict versions, a
     nativeVersions: async () => ['2.0.29', '2.0.27', '1.18.20'], nativeLaunch: () => { launches++; },
     nativeSelectedRelease: async version => { if (blocked) { started(); await gate; } return release(version); },
   });
-  const install = fields => controller.call({ operation: 'opencode-install', password: currentPassword, acknowledge: true, version: '1.18.20', ...fields });
+  const install = fields => controller.call({ operation: 'opencode-install', acknowledge: true, version: '1.18.20', ...fields });
   try {
-    assert.equal((await install({ password: 'wrong' })).status, 401);
     assert.equal((await install({ acknowledge: false })).status, 422);
     assert.equal((await install({ version: '2.0.26' })).status, 422);
     assert.equal((await install({ version: 'v1.18.20' })).status, 422);

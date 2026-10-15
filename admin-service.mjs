@@ -12,9 +12,10 @@ import { maximumProviderModels, providerFailure, providerText, providerConnectio
 
 const providerPackage = '@opencode/ai/providers/openai-compatible';
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const validProviderID = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,62}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 
 export function validateCustomProvider(value) {
-  if (!record(value) || !/^[a-z][a-z0-9_-]{0,62}$/.test(value.id || '') || ['constructor', 'prototype', '__proto__'].includes(value.id)) throw providerFailure(422, 'ID nhà cung cấp cần bắt đầu bằng chữ thường, chỉ gồm chữ thường, số, dấu gạch ngang hoặc gạch dưới; tối đa 63 ký tự.');
+  if (!record(value) || !validProviderID(value.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
   if (!providerText(value.name, 128)) throw providerFailure(422, 'Tên nhà cung cấp không hợp lệ; tối đa 128 ký tự.');
   const connection = providerConnection(value);
   if (!Array.isArray(value.models) || !value.models.length || value.models.length > maximumProviderModels) throw providerFailure(422, `Cần khai báo từ 1 đến ${maximumProviderModels} model.`);
@@ -95,11 +96,11 @@ function providerFileUnlocked(context, request) {
   const { file, previous, text, data } = providerSource(context);
   const revision = value => createHash('sha256').update(file + '\0' + value).digest('hex');
   const secretDirectory = join(context.directory, '.web-login-secrets');
-  const keyPattern = /^[a-z][a-z0-9_-]{0,79}\.key$/;
+  const keyPattern = /^[a-z0-9][a-z0-9_-]{0,79}\.key$/;
   const safeEndpoint = value => { try { const url = new URL(value); return providerText(value, 2048) && !/[{}]/.test(value) && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; } catch { return false; } };
   const summary = () => ({ status: 200, supported: true, revision: revision(text), providers: Object.entries(data.providers || {}).slice(0, 100).map(([id, provider]) => ({
     id, name: typeof provider?.name === 'string' ? provider.name : id,
-    editable: provider?.package === providerPackage && Object.keys(provider.models || {}).length <= maximumProviderModels && (provider?.settings?.baseURL === undefined || safeEndpoint(provider.settings.baseURL)) && /^[a-z][a-z0-9_-]{0,62}$/.test(id) && !['constructor', 'prototype', '__proto__'].includes(id),
+    editable: provider?.package === providerPackage && Object.keys(provider.models || {}).length <= maximumProviderModels && (provider?.settings?.baseURL === undefined || safeEndpoint(provider.settings.baseURL)) && validProviderID(id),
     baseURL: safeEndpoint(provider?.settings?.baseURL) ? provider.settings.baseURL : '',
     hasKey: Boolean(provider?.settings?.apiKey || provider?.env?.length),
     models: Object.entries(provider?.models || {}).slice(0, maximumProviderModels).map(([id, model]) => ({ id, name: typeof model?.name === 'string' ? model.name : id })),
@@ -120,7 +121,7 @@ function providerFileUnlocked(context, request) {
   }
   if (!['save', 'remove'].includes(request.action) || request.revision !== revision(text)) throw providerFailure(409, 'Cấu hình đã thay đổi. Vui lòng tải lại danh sách trước khi lưu.');
   const input = request.action === 'save' ? validateCustomProvider(request.provider) : { id: request.id };
-  if (!/^[a-z][a-z0-9_-]{0,62}$/.test(input.id || '') || ['constructor', 'prototype', '__proto__'].includes(input.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
+  if (!validProviderID(input.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
   const existing = data.providers?.[input.id];
   if (existing && existing.package !== providerPackage) throw providerFailure(422, 'Nhà cung cấp này dùng kiểu cấu hình khác; không sửa qua biểu mẫu OpenAI-compatible.');
   if (request.action === 'save' && Object.keys(existing?.models || {}).length > maximumProviderModels) throw providerFailure(422, `Nhà cung cấp có hơn ${maximumProviderModels} model; cần sửa tệp để tránh bỏ sót model khi dùng biểu mẫu.`);
@@ -189,7 +190,7 @@ export async function discoverProviderModels(context, request, dependencies) {
     const reference = existing.settings?.apiKey;
     if (typeof reference === 'string' && reference.startsWith('{file:') && reference.endsWith('}')) {
       const key = reference.slice(6, -1), directory = join(context.directory, '.web-login-secrets');
-      if (dirname(key) !== directory || !/^[a-z][a-z0-9_-]{0,79}\.key$/.test(key.slice(directory.length + 1))) throw providerFailure(422, 'Khóa dùng tham chiếu tệp ngoài module. Hãy nhập API key để quét model.');
+      if (dirname(key) !== directory || !/^[a-z0-9][a-z0-9_-]{0,79}\.key$/.test(key.slice(directory.length + 1))) throw providerFailure(422, 'Khóa dùng tham chiếu tệp ngoài module. Hãy nhập API key để quét model.');
       ownedProviderPath(directory, true, true); ownedProviderPath(key, false, true);
       connection.apiKey = providerRead(key).content.toString('utf8');
     } else if (reference) connection.apiKey = reference;
@@ -497,13 +498,8 @@ export function createAdminController(config, dependencies = {}) {
   let nativeRelease = null, nativeChecked = 0, nativeError = '', nativeChecking, nativeMajor;
   let versions = [], versionsChecked = 0, versionsError = '', versionsChecking;
   let cachedRelease = null, checked = 0, checkError = '', checking, preferenceRevision = 0;
-  let attempts = 0, until = 0, discovering = false, discoveryAttempts = 0, discoveryUntil = 0;
-  const matchesPassword = password => typeof password === 'string' && password.length <= 2048 && equal(password, getPassword());
-  const authenticate = password => {
-    if (Date.now() >= until) { until = Date.now() + 60000; attempts = 0; }
-    if (++attempts > 10) return { status: 429, message: 'Quá nhiều lần xác nhận mật khẩu. Vui lòng thử lại sau một phút.' };
-    if (!matchesPassword(password)) return { status: 401, message: 'Mật khẩu hiện tại không đúng.' };
-  };
+  let discovering = false, discoveryAttempts = 0, discoveryUntil = 0;
+  const credentialUnchanged = credential => equal(credential, getPassword());
   async function check(force = false) {
     if (checking) return checking;
     if (checked && Date.now() - checked < (force ? 60000 : 300000)) return;
@@ -561,14 +557,14 @@ export function createAdminController(config, dependencies = {}) {
       return { ...status(), providers: result };
     } catch (error) { return { ...status(), providers: { supported: false, reason: error.publicMessage || 'Chưa đọc được cấu hình nhà cung cấp. Kiểm tra quyền tệp và dịch vụ OpenCode.' } }; }
   }
-  async function changeProvider(context, fields, input, remove) {
+  async function changeProvider(context, fields, input, remove, credential) {
     let saved;
     try {
-      if (!matchesPassword(fields.password)) throw providerFailure(401, 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.');
+      if (!credentialUnchanged(credential)) throw providerFailure(401, 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
       const current = await runProvider(context, { action: 'read' });
       if (current.status !== 200) throw providerFailure(current.status, current.message);
       if (!remove && !current.providers.some(provider => provider.id === input.id) && await providerExists(input.id)) throw providerFailure(409, 'ID này đã được OpenCode hoặc cấu hình khác sử dụng. Hãy chọn một ID tùy chỉnh mới.');
-      if (!matchesPassword(fields.password)) throw providerFailure(401, 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.');
+      if (!credentialUnchanged(credential)) throw providerFailure(401, 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
       saved = await runProvider(context, remove ? { action: 'remove', id: input.id, revision: fields.revision } : { action: 'save', provider: input, revision: fields.revision });
       if (saved.status !== 200) throw providerFailure(saved.status, saved.message);
       setJob({ type: 'providers', phase: 'running', started: Date.now(), context, backup: saved.backup, message: 'Đã lưu tệp riêng; đang tải lại cấu hình và kiểm tra model trong OpenCode.' });
@@ -603,8 +599,7 @@ export function createAdminController(config, dependencies = {}) {
       if (operation === 'opencode-check') { await Promise.all([checkNative(), checkVersions()]); return nativeStatus(); }
       if (operation === 'providers-status') return providersStatus();
       if (!['password', 'preferences', 'update', 'opencode-update', 'opencode-install', 'provider-save', 'provider-remove', 'provider-models'].includes(operation)) return { status: 400, message: 'Thao tác không hợp lệ.' };
-      const rejected = authenticate(fields.password);
-      if (rejected) return rejected;
+      const credential = getPassword();
       if (busy()) return { status: 409, message: 'Đang xử lý một tác vụ quản trị. Vui lòng chờ.' };
       if (operation === 'provider-models') {
         if (discovering) return { status: 409, message: 'Đang quét model. Vui lòng chờ.' };
@@ -614,12 +609,12 @@ export function createAdminController(config, dependencies = {}) {
         discovering = true;
         try {
           providerConnection(fields.provider);
-          if (fields.provider.id && (!/^[a-z][a-z0-9_-]{0,62}$/.test(fields.provider.id) || ['constructor', 'prototype', '__proto__'].includes(fields.provider.id))) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
+          if (fields.provider.id && !validProviderID(fields.provider.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
           const context = await getProviderContext();
-          if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+          if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
           if (busy()) return { status: 409, message: 'Đang xử lý một tác vụ quản trị. Vui lòng chờ.' };
           const result = await runProvider(context, { action: 'discover', revision: fields.revision, provider: fields.provider });
-          if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+          if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
           return result;
         } catch (error) { return { status: error.status || 503, message: error.publicMessage || 'Không quét được model. Kiểm tra kết nối và cấu hình nhà cung cấp.' }; }
         finally { discovering = false; }
@@ -629,13 +624,13 @@ export function createAdminController(config, dependencies = {}) {
         const remove = operation === 'provider-remove'; let input, context;
         try {
           input = remove ? { id: fields.id } : validateCustomProvider(fields.provider);
-          if (!/^[a-z][a-z0-9_-]{0,62}$/.test(input.id || '') || ['constructor', 'prototype', '__proto__'].includes(input.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
+          if (!validProviderID(input.id)) throw providerFailure(422, 'ID nhà cung cấp không hợp lệ.');
           context = await getProviderContext();
         } catch (error) { return { status: error.status || 503, message: error.publicMessage || 'Chưa xác định được cấu hình OpenCode để lưu provider.' }; }
-        if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+        if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
         if (busy()) return { status: 409, message: 'Đang xử lý một tác vụ quản trị. Vui lòng chờ.' };
         setJob({ type: 'providers', phase: 'running', started: Date.now(), message: remove ? 'Đang xóa nhà cung cấp và tải lại cấu hình OpenCode.' : 'Đang sao lưu và lưu nhà cung cấp tùy chỉnh.' });
-        setTimeout(() => changeProvider(context, fields, input, remove).catch(() => {}), 100);
+        setTimeout(() => changeProvider(context, fields, input, remove, credential).catch(() => {}), 100);
         return { status: 202, message: 'Đã nhận yêu cầu. Trang sẽ theo dõi việc lưu và tải lại cấu hình OpenCode.' };
       }
       if (['opencode-update', 'opencode-install'].includes(operation)) {
@@ -649,9 +644,9 @@ export function createAdminController(config, dependencies = {}) {
           selected = await selectedNative(fields.version, { signal: AbortSignal.timeout(6000) });
           if (selected.version !== fields.version) throw new Error('Selected release mismatch');
         } else await checkNative();
-        if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+        if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
         const info = await inspectNative();
-        if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+        if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
         if (busy()) return { status: 409, message: 'Đang xử lý một tác vụ quản trị. Vui lòng chờ.' };
         if (!info.supported) return { status: 422, message: info.reason };
         const release = explicit ? selected : nativeRelease && compareVersions(nativeRelease.version, info.installedVersion) > 0 ? nativeRelease : null;
@@ -659,7 +654,7 @@ export function createAdminController(config, dependencies = {}) {
         if (!release && !info.pendingRestart) return { status: 409, message: nativeError || 'OpenCode đã ở phiên bản mới nhất được hỗ trợ.' };
         const version = release?.version || info.installedVersion;
         const downgrade = compareVersions(version, info.installedVersion) < 0;
-        setJob({ type: 'opencode-update', phase: 'starting', version, release: version === info.installedVersion ? null : release, explicitTarget: explicit, fromVersion: info.installedVersion, passwordRevision: createHash('sha256').update(getPassword()).digest('hex'), started: Date.now(), message: release ? `Đang chuẩn bị ${downgrade ? 'hạ cấp' : 'cập nhật'} OpenCode về ${version}.` : 'Đang chuẩn bị khởi động lại OpenCode để dùng bản đã cài.' });
+        setJob({ type: 'opencode-update', phase: 'starting', version, release: version === info.installedVersion ? null : release, explicitTarget: explicit, fromVersion: info.installedVersion, passwordRevision: createHash('sha256').update(credential).digest('hex'), started: Date.now(), message: release ? `Đang chuẩn bị ${downgrade ? 'hạ cấp' : 'cập nhật'} OpenCode về ${version}.` : 'Đang chuẩn bị khởi động lại OpenCode để dùng bản đã cài.' });
         try { await launchNative(); }
         catch { setJob({ type: 'opencode-update', phase: 'failed', message: 'Không khởi động được bộ cập nhật OpenCode.' }); return { status: 503, message: 'Không khởi động được bộ cập nhật OpenCode.' }; }
         return { status: 202, message: 'Đã bắt đầu tác vụ OpenCode. Trang sẽ kiểm tra kết quả sau khi dịch vụ khởi động lại.' };
@@ -673,11 +668,13 @@ export function createAdminController(config, dependencies = {}) {
         return { ...status(), message: 'Đã lưu cấu hình cập nhật.' };
       }
       if (operation === 'update') {
+        if (fields.acknowledge !== true) return { status: 422, message: 'Vui lòng xác nhận đã lưu công việc trước khi cập nhật.' };
         await check();
-        if (!matchesPassword(fields.password)) return { status: 401, message: 'Mật khẩu hiện tại đã thay đổi. Vui lòng xác nhận lại.' };
+        if (!credentialUnchanged(credential)) return { status: 401, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
         return startUpdate();
       }
-      if (!validPassword(fields.newPassword) || fields.newPassword !== fields.confirmPassword || equal(fields.newPassword, fields.password)) return { status: 422, message: 'Mật khẩu mới cần khác mật khẩu cũ, từ 16 đến 128 ký tự và khớp với ô xác nhận.' };
+      if (fields.acknowledge !== true) return { status: 422, message: 'Vui lòng xác nhận đã lưu công việc và đồng ý khởi động lại OpenCode.' };
+      if (!validPassword(fields.newPassword) || fields.newPassword !== fields.confirmPassword || equal(fields.newPassword, credential)) return { status: 422, message: 'Mật khẩu mới cần khác mật khẩu cũ, từ 16 đến 128 ký tự và khớp với ô xác nhận.' };
       setJob({ type: 'password', phase: 'running', started: Date.now(), message: 'Đang đổi mật khẩu và khởi động lại OpenCode.' });
       setTimeout(async () => {
         try { await rotate(fields.newPassword); setJob({ type: 'password', phase: 'succeeded', message: 'Đã đổi mật khẩu. Vui lòng đăng nhập lại.' }); }

@@ -280,5 +280,8 @@
   "m279": "Contrasenya actual OpenCode per confirmar",
   "m280": "Accepto tornar a carregar la configuració OpenCode; les sol·licituds d'aprovació pendents es poden cancel·lar.",
   "m281": "Desa el proveïdor",
-  "m282": "Suprimeix el proveïdor"
+  "m282": "Suprimeix el proveïdor",
+  "m283": "Proveïdors connectats",
+  "m284": "Encara no hi ha proveïdors.",
+  "m285": "Edita"
 }

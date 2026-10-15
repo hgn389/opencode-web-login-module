@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { parse } from 'jsonc-parser';
 import { once } from 'node:events';
 import http from 'node:http';
-import { createAdminController, providerFileOperation, validateCustomProvider } from '../admin-service.mjs';
+import { createAdminController, providerFileOperation, validateCustomProvider, discoverProviderModels } from '../admin-service.mjs';
 import { createLoginServer } from '../index.mjs';
 import { SecurityStore } from '../security.mjs';
 
@@ -22,12 +22,43 @@ const fixture = () => {
 };
 
 test('custom provider validation restricts IDs, URLs, interpolation, secrets and model definitions', () => {
+  assert.equal(validateCustomProvider({ ...provider(), id: '9router' }).id, '9router');
+  for (const id of [9, ['9router'], '-router', '_router', 'a'.repeat(64)]) assert.throws(() => validateCustomProvider({ ...provider(), id }));
   assert.equal(validateCustomProvider({ ...provider(), command: 'arbitrary', file: '/etc/passwd', package: 'arbitrary' }).id, 'acme');
   assert(!Object.hasOwn(validateCustomProvider(provider()), 'command'));
   for (const fields of [{ id: '__proto__' }, { id: 'constructor' }, { id: 'UPPERCASE' }, { id: '../file' }, { name: '{file:/etc/passwd}' }, { baseURL: 'file:///etc/passwd' }, { baseURL: 'https://user:pass@api.example.com' }, { baseURL: 'https://api.example.com/?key=secret' }, { baseURL: 'http://127.0.0.1:8000/v1' }, { apiKey: 'key\nvalue' }, { apiKey: '{env:HOME}' }, { clearKey: true }, { models: [] }, { models: [{ id: 'x' }, { id: 'x' }] }, { models: [{ id: '${HOME}' }] }]) assert.throws(() => validateCustomProvider({ ...provider(), ...fields }));
   assert.equal(validateCustomProvider({ ...provider(), baseURL: 'http://127.0.0.1:8000/v1', allowHttp: true }).allowHttp, true);
   assert.throws(() => validateCustomProvider({ ...provider(), apiKey: 'khóa-không-hợp-lệ' }));
   assert.throws(() => validateCustomProvider({ ...provider(), apiKey: 'key with spaces' }));
+});
+
+test('numeric-leading provider IDs retain private keys for rescan, editing and exact rollback', async () => {
+  const f = fixture();
+  try {
+    const read = () => providerFileOperation(f.context, { action: 'read' });
+    const input = { ...provider(), id: '9router' };
+    const created = providerFileOperation(f.context, { action: 'save', revision: read().revision, provider: input });
+    let current = read();
+    assert.equal(current.providers[0].editable, true);
+    const scanned = await discoverProviderModels(f.context, { revision: current.revision, provider: { id: input.id, baseURL: input.baseURL } }, {
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      request: async options => {
+        assert.equal(options.headers.authorization, 'Bearer ' + apiKey);
+        return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: [{ id: 'coder' }] }) };
+      },
+    });
+    assert.equal(scanned.models[0].id, 'coder');
+    const edited = providerFileOperation(f.context, { action: 'save', revision: current.revision, provider: { ...input, apiKey: 'replacement-private-key', baseURL: 'https://another.example.com/v1' } });
+    providerFileOperation(f.context, { action: 'restore', backup: edited.backup });
+    current = read();
+    const file = join(f.context.directory, 'opencode.json');
+    const key = parse(readFileSync(file, 'utf8')).providers[input.id].settings.apiKey.slice(6, -1);
+    assert.equal(readFileSync(key, 'utf8'), apiKey);
+    assert.equal(current.providers[0].baseURL, input.baseURL);
+    providerFileOperation(f.context, { action: 'restore', backup: created.backup });
+    assert.equal(read().providers.length, 0);
+    assert.equal(lstatSync(key, { throwIfNoEntry: false }), undefined);
+  } finally { f.close(); }
 });
 
 test('JSONC edits preserve other settings, hide stored keys, use private files and Git backups, and restore exactly', () => {
@@ -108,7 +139,7 @@ test('replacing an endpoint and key uses an immutable new secret file and rolls 
   } finally { f.close(); }
 });
 
-test('provider jobs require password and acknowledgement, serialize changes and roll back a failed reload', async () => {
+test('provider jobs use session authorization and require acknowledgement, serialize changes and roll back a failed reload', async () => {
   for (const fail of [false, true]) {
     const f = fixture(); let reloads = 0;
     const code = join(f.directory, 'code'); mkdirSync(code); writeFileSync(join(code, 'package.json'), '{"version":"1.1.2-beta"}');
@@ -118,8 +149,7 @@ test('provider jobs require password and acknowledgement, serialize changes and 
     });
     try {
       const status = await controller.call({ operation: 'providers-status' });
-      const fields = { operation: 'provider-save', password, acknowledge: true, revision: status.providers.revision, provider: provider() };
-      assert.equal((await controller.call({ ...fields, password: 'wrong' })).status, 401);
+      const fields = { operation: 'provider-save', acknowledge: true, revision: status.providers.revision, provider: provider() };
       assert.equal((await controller.call({ ...fields, acknowledge: false })).status, 422);
       assert.equal((await controller.call(fields)).status, 202);
       assert.equal((await controller.call(fields)).status, 409);
@@ -136,7 +166,7 @@ test('provider API enforces authentication, origin, CSRF and field restrictions;
   const f = fixture(), socket = join(f.directory, 'admin.sock'); let forwarded;
   const helper = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk); forwarded = JSON.parse(Buffer.concat(chunks));
-    const result = forwarded.operation === 'providers-status' ? { status: 200, available: true, providers: { supported: true, revision: 'a'.repeat(64), providers: [] } } : forwarded.operation === 'provider-models' ? forwarded.password === password ? { status: 200, models: [{ id: 'coder', name: 'Coder' }], skipped: 0 } : { status: 401, message: 'Incorrect password' } : { status: 202, message: 'Fixture accepted' };
+    const result = forwarded.operation === 'providers-status' ? { status: 200, available: true, providers: { supported: true, revision: 'a'.repeat(64), providers: [] } } : forwarded.operation === 'provider-models' ? { status: 200, models: [{ id: 'coder', name: 'Coder' }], skipped: 0 } : { status: 202, message: 'Fixture accepted' };
     res.writeHead(result.status, { 'content-type': 'application/json' }); res.end(JSON.stringify(result));
   });
   const backend = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json', etag: 'private' }); res.end(JSON.stringify({ name: 'Fixture', settings: { apiKey }, headers: { Authorization: 'isolated-header-value' }, models: [{ id: 'coder', enabled: true }] })); });
@@ -149,22 +179,23 @@ test('provider API enforces authentication, origin, CSRF and field restrictions;
   try {
     assert.equal((await fetch(origin + '/web-login/api/providers-status')).status, 401);
     const status = await (await request('/web-login/api/providers-status')).json();
-    const options = { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-web-login-csrf': status.csrf }, body: JSON.stringify({ password, acknowledge: true, revision: status.providers.revision, provider: provider(), file: '/etc/passwd', command: 'arbitrary' }) };
+    const options = { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-web-login-csrf': status.csrf }, body: JSON.stringify({ acknowledge: true, revision: status.providers.revision, provider: provider(), file: '/etc/passwd', command: 'arbitrary' }) };
     assert.equal((await request('/web-login/api/provider-save', { ...options, headers: { ...options.headers, origin: 'https://attacker.example' } })).status, 403);
     assert.equal((await request('/web-login/api/provider-save', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
-    assert.equal((await request('/web-login/api/provider-save', options)).status, 202); assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'password', 'provider', 'revision']);
-    const scan = { ...options, body: JSON.stringify({ password, revision: status.providers.revision, provider: { baseURL: provider().baseURL, apiKey }, file: '/etc/passwd', operation: 'password' }) };
+    assert.equal((await request('/web-login/api/provider-save', options)).status, 202); assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation',  'provider', 'revision']);
+    const scan = { ...options, body: JSON.stringify({ revision: status.providers.revision, provider: { baseURL: provider().baseURL, apiKey }, file: '/etc/passwd', operation: 'password' }) };
     assert.equal((await fetch(origin + '/web-login/api/provider-models')).status, 401);
     assert.equal((await request('/web-login/api/provider-models', { ...scan, headers: { ...scan.headers, origin: 'https://attacker.example' } })).status, 403);
     assert.equal((await request('/web-login/api/provider-models', { ...scan, headers: { ...scan.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
-    assert.equal((await request('/web-login/api/provider-models', { ...scan, body: JSON.stringify({ password: 'wrong', revision: status.providers.revision, provider: { baseURL: provider().baseURL } }) })).status, 401);
+    assert.equal((await fetch(origin + '/web-login/api/provider-models', scan)).status, 401);
+    store.fail('127.0.0.1');
     const failures = store.state('127.0.0.1').failures; assert.equal(failures, 1);
     assert.equal((await request('/web-login/api/provider-models', scan)).status, 200);
     assert.equal(store.state('127.0.0.1').failures, failures);
-    assert.deepEqual(Object.keys(forwarded).sort(), ['operation', 'password', 'provider', 'revision']);
+    assert.deepEqual(Object.keys(forwarded).sort(), ['operation',  'provider', 'revision']);
     assert.equal(forwarded.operation, 'provider-models');
     const large = { ...provider(), models: Array.from({ length: 500 }, (_, i) => ({ id: 'model-' + i + '-'.repeat(100), name: 'Name'.repeat(30) })) };
-    assert.equal((await request('/web-login/api/provider-save', { ...options, body: JSON.stringify({ password, acknowledge: true, revision: status.providers.revision, provider: large }) })).status, 202);
+    assert.equal((await request('/web-login/api/provider-save', { ...options, body: JSON.stringify({ acknowledge: true, revision: status.providers.revision, provider: large }) })).status, 202);
     assert.equal(forwarded.provider.models.length, 500);
     for (const path of ['/api/provider/acme', '/api/%70rovider/acme', '/api/config', '/api/model', '/provider']) {
       const response = await request(path); const text = await response.text(); assert.equal(response.status, 200); assert(!text.includes(apiKey)); assert(!text.includes('isolated-header-value')); assert(text.includes('coder')); assert(!response.headers.has('etag'));

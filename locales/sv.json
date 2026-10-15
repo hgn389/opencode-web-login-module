@@ -280,5 +280,8 @@
   "m279": "Aktuellt OpenCode lösenord för att bekräfta",
   "m280": "Jag går med på att ladda om OpenCode-konfigurationen; väntande godkännandeförfrågningar kan avbrytas.",
   "m281": "Spara leverantör",
-  "m282": "Ta bort leverantör"
+  "m282": "Ta bort leverantör",
+  "m283": "Anslutna leverantörer",
+  "m284": "Inga leverantörer ännu.",
+  "m285": "Redigera"
 }

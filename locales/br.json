@@ -280,5 +280,8 @@
   "m279": "Senha atual OpenCode para confirmar",
   "m280": "Concordo em recarregar a configuração OpenCode; solicitações de aprovação pendentes poderão ser canceladas.",
   "m281": "Salvar provedor",
-  "m282": "Excluir provedor"
+  "m282": "Excluir provedor",
+  "m283": "Provedores conectados",
+  "m284": "Nenhum provedor ainda.",
+  "m285": "Editar"
 }

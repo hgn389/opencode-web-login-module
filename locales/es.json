@@ -280,5 +280,8 @@
   "m279": "Contraseña OpenCode actual para confirmar",
   "m280": "Acepto recargar la configuración OpenCode; Las solicitudes de aprobación pendientes pueden cancelarse.",
   "m281": "Guardar proveedor",
-  "m282": "Eliminar proveedor"
+  "m282": "Eliminar proveedor",
+  "m283": "Proveedores conectados",
+  "m284": "Todavía no hay proveedores.",
+  "m285": "Editar"
 }

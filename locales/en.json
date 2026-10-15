@@ -280,5 +280,8 @@
   "m279": "Current OpenCode password to confirm",
   "m280": "I agree to reload the OpenCode configuration; pending approval requests may be cancelled.",
   "m281": "Save provider",
-  "m282": "Delete provider"
+  "m282": "Delete provider",
+  "m283": "Connected providers",
+  "m284": "No providers yet.",
+  "m285": "Edit"
 }

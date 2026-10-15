@@ -280,5 +280,8 @@
   "m279": "Aktuelles OpenCode Passwort zur Bestätigung",
   "m280": "Ich bin damit einverstanden, die OpenCode-Konfiguration neu zu laden; Ausstehende Genehmigungsanträge können storniert werden.",
   "m281": "Anbieter speichern",
-  "m282": "Anbieter löschen"
+  "m282": "Anbieter löschen",
+  "m283": "Verbundene Anbieter",
+  "m284": "Noch keine Anbieter vorhanden.",
+  "m285": "Bearbeiten"
 }

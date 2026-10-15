@@ -13,10 +13,40 @@ import { i18n } from '/login/i18n-client.js';
     close(); focusBefore = document.activeElement;
     dialog = document.createElement('dialog'); dialog.className = 'web-login-dialog'; i18n.attr(dialog, 'aria-label', () => (title));
     const header = document.createElement('div'); header.className = 'web-login-dialog-header';
-    const label = document.createElement('strong'); i18n.text(label, () => (title));
+    const navigation = document.createElement('nav'); navigation.className = 'web-login-dialog-tabs'; i18n.attr(navigation, 'aria-label', 'Cài đặt Web Login Module');
+    const select = (selected, label) => {
+      i18n.attr(dialog, 'aria-label', () => label); i18n.attr(frame, 'title', () => label);
+      for (const link of navigation.children) {
+        if (link.dataset.page === selected) {
+          link.setAttribute('aria-current', 'page');
+          link.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+        else link.removeAttribute('aria-current');
+      }
+    };
+    for (const [page, label] of items) {
+      const link = document.createElement('a'); link.href = `/web-login/${page}`; link.dataset.page = page; i18n.text(link, () => label);
+      link.addEventListener('click', event => {
+        if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (link.getAttribute('aria-current') === 'page') return;
+        select(page, label); frame.src = link.href;
+      });
+      navigation.append(link);
+    }
     const button = document.createElement('button'); button.type = 'button'; i18n.text(button, () => ('Đóng')); button.addEventListener('click', close);
-    header.append(label, button);
+    header.append(navigation, button);
     frame = document.createElement('iframe'); frame.src = `/web-login/${id}`; i18n.attr(frame, 'title', () => (title));
+    const currentFrame = frame;
+    frame.addEventListener('load', () => {
+      if (frame !== currentFrame) return;
+      try {
+        const page = items.find(([page]) => currentFrame.contentWindow.location.pathname === `/web-login/${page}`);
+        if (page) select(...page);
+        currentFrame.contentWindow.postMessage({ type: 'web-login-language', locale: i18n.locale }, location.origin);
+      } catch { /* Ignore a frame that has navigated outside this origin. */ }
+    });
+    select(id, title);
     dialog.append(header, frame); document.body.append(dialog);
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
     dialog.showModal(); button.focus();

@@ -280,5 +280,8 @@
   "m279": "Jelenlegi OpenCode jelszó a megerősítéshez",
   "m280": "Hozzájárulok a OpenCode konfiguráció újratöltéséhez; a függőben lévő jóváhagyási kérelmek törölhetők.",
   "m281": "Szolgáltató mentése",
-  "m282": "Szolgáltató törlése"
+  "m282": "Szolgáltató törlése",
+  "m283": "Csatlakoztatott szolgáltatók",
+  "m284": "Még nincsenek szolgáltatók.",
+  "m285": "Szerkesztés"
 }

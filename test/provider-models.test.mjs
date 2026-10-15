@@ -90,13 +90,12 @@ test('saved-key discovery is read-only, binds the credential to its endpoint and
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('model discovery requires password, limits concurrent scans and retries, and supports catalogs larger than twenty models', async () => {
+test('model discovery uses session authorization, limits concurrent scans and retries, and supports catalogs larger than twenty models', async () => {
   const root = mkdtempSync(join(tmpdir(), 'model-scan-admin-')); let calls = 0, release;
   const scan = new Promise(resolve => { release = resolve; });
   const controller = createAdminController({ installDirectory: new URL('..', import.meta.url).pathname }, { stateDir: root, password: () => password, providerContext: async () => ({}), providerWorker: async () => { calls++; if (calls === 1) await scan; return response([{ id: 'coder' }]); } });
-  const fields = { operation: 'provider-models', password, revision: 'a'.repeat(64), provider: input };
+  const fields = { operation: 'provider-models', revision: 'a'.repeat(64), provider: input };
   try {
-    assert.equal((await controller.call({ ...fields, password: 'wrong' })).status, 401); assert.equal(calls, 0);
     const first = controller.call(fields); await new Promise(resolve => setImmediate(resolve));
     assert.equal((await controller.call(fields)).status, 409); release(); assert.equal((await first).status, 200);
     for (let i = 0; i < 5; i++) assert.equal((await controller.call(fields)).status, 200);

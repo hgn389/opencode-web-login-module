@@ -280,5 +280,8 @@
   "m279": "Aktuel OpenCode adgangskode for at bekræfte",
   "m280": "Jeg accepterer at genindlæse OpenCode-konfigurationen; afventende godkendelsesanmodninger kan blive annulleret.",
   "m281": "Gem udbyder",
-  "m282": "Slet udbyder"
+  "m282": "Slet udbyder",
+  "m283": "Tilsluttede udbydere",
+  "m284": "Ingen udbydere endnu.",
+  "m285": "Rediger"
 }

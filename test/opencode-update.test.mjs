@@ -45,21 +45,20 @@ function controllerFixture(overrides = {}) {
   return { directory, stateDir, controller: createAdminController({ installDirectory: join(directory, 'code') }, dependencies), close: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
-test('native update requires current password and acknowledgement, keeps automatic settings separate and serializes jobs', async () => {
+test('native update uses session authorization and requires acknowledgement, keeps automatic settings separate and serializes jobs', async () => {
   let launches = 0, checks = 0;
   const f = controllerFixture({ nativeLaunch: () => { launches++; }, nativeRelease: async () => { checks++; return release('2.0.2'); } });
   try {
     let status = await f.controller.call({ operation: 'opencode-status' });
     assert.equal(status.opencode.version, '2.0.1'); assert.equal(status.opencode.canUpdate, false);
     status = await f.controller.call({ operation: 'opencode-check' }); assert.equal(status.opencode.canUpdate, true);
-    assert.equal((await f.controller.call({ operation: 'opencode-update', password: 'wrong', acknowledge: true })).status, 401);
-    assert.equal((await f.controller.call({ operation: 'opencode-update', password })).status, 422);
+    assert.equal((await f.controller.call({ operation: 'opencode-update' })).status, 422);
     assert.equal(launches, 0);
-    assert.equal((await f.controller.call({ operation: 'opencode-update', password, acknowledge: true, version: '999.0.0', command: 'arbitrary' })).status, 202);
+    assert.equal((await f.controller.call({ operation: 'opencode-update', acknowledge: true, version: '999.0.0', command: 'arbitrary' })).status, 202);
     const job = JSON.parse(readFileSync(join(f.stateDir, 'job.json')));
     assert.equal(job.version, '2.0.2'); assert.equal(job.type, 'opencode-update'); assert(!JSON.stringify(job).includes(password));
     assert.equal((await f.controller.call({ operation: 'preferences', password, automatic: true, channel: 'beta' })).status, 409);
-    assert.equal((await f.controller.call({ operation: 'opencode-update', password, acknowledge: true })).status, 409);
+    assert.equal((await f.controller.call({ operation: 'opencode-update', acknowledge: true })).status, 409);
     await f.controller.automatic(); assert.equal(launches, 1); assert.equal(checks, 1);
     assert.equal((await f.controller.call({ operation: 'status' })).preferences.automatic, false);
   } finally { f.close(); }
@@ -68,13 +67,13 @@ test('native update requires current password and acknowledgement, keeps automat
 test('native update rejects equal, older and unsupported installations and can apply a pending installed release', async () => {
   for (const version of ['2.0.1', '2.0.0']) {
     const f = controllerFixture({ nativeRelease: async () => release(version) });
-    try { assert.equal((await f.controller.call({ operation: 'opencode-update', password, acknowledge: true })).status, 409); } finally { f.close(); }
+    try { assert.equal((await f.controller.call({ operation: 'opencode-update', acknowledge: true })).status, 409); } finally { f.close(); }
   }
   const unsupported = controllerFixture({ nativeInfo: async () => ({ supported: false, version: '0.0.0-v2-local', reason: 'Unsupported installation' }) });
-  try { assert.equal((await unsupported.controller.call({ operation: 'opencode-update', password, acknowledge: true })).status, 422); } finally { unsupported.close(); }
+  try { assert.equal((await unsupported.controller.call({ operation: 'opencode-update', acknowledge: true })).status, 422); } finally { unsupported.close(); }
   const pending = controllerFixture({ nativeInfo: async () => ({ supported: true, version: '2.0.0', installedVersion: '2.0.1', pendingRestart: true }), nativeRelease: async () => release('2.0.1') });
   try {
-    assert.equal((await pending.controller.call({ operation: 'opencode-update', password, acknowledge: true })).status, 202);
+    assert.equal((await pending.controller.call({ operation: 'opencode-update', acknowledge: true })).status, 202);
     const job = JSON.parse(readFileSync(join(pending.stateDir, 'job.json'))); assert.equal(job.version, '2.0.1'); assert.equal(job.release, null);
   } finally { pending.close(); }
 });
@@ -83,7 +82,7 @@ test('native update reauthenticates after a pending check and only one concurren
   const gate = deferred(); let current = password, launches = 0;
   const f = controllerFixture({ password: () => current, nativeRelease: () => gate.promise, nativeLaunch: () => { launches++; } });
   try {
-    const pending = f.controller.call({ operation: 'opencode-update', password, acknowledge: true });
+    const pending = f.controller.call({ operation: 'opencode-update', acknowledge: true });
     current = 'replacement-native-update-password'; gate.resolve(release('2.0.2'));
     assert.equal((await pending).status, 401); assert.equal(launches, 0);
     const results = await Promise.all([f.controller.call({ operation: 'opencode-update', password: current, acknowledge: true }), f.controller.call({ operation: 'opencode-update', password: current, acknowledge: true })]);
@@ -126,17 +125,17 @@ test('native web APIs enforce session, origin, CSRF and acknowledgement without 
     assert.equal((await request('/web-login/api/opencode-check', { ...options, headers: { ...options.headers, origin: 'https://attacker.example' } })).status, 403);
     assert.equal((await request('/web-login/api/opencode-update', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
     assert.equal((await request('/web-login/api/opencode-install', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
-    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '2.0.0;id' }) })).status, 422);
+    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ acknowledge: true, version: '2.0.0;id' }) })).status, 422);
     for (let i = 0; i < 3; i++) store.fail('127.0.0.1');
     assert.equal((await request('/web-login/api/opencode-check', options)).status, 200); assert.equal(store.state('127.0.0.1').failures, 3);
-    assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ password: 'wrong', acknowledge: true }) })).status, 401); assert.equal(store.state('127.0.0.1').failures, 4);
-    assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ password }) })).status, 422);
-    assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '999.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
-    assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'password']); assert.equal(store.state('127.0.0.1').failures, 0);
+    assert.equal((await fetch(origin + '/web-login/api/opencode-update', options)).status, 401); assert.equal(store.state('127.0.0.1').failures, 3);
+    assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({}) })).status, 422);
+    assert.equal((await request('/web-login/api/opencode-update', { ...options, body: JSON.stringify({ acknowledge: true, version: '999.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
+    assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation']); assert.equal(store.state('127.0.0.1').failures, 3);
     assert(store.session(session, origin), 'An OpenCode update must not revoke the unchanged login credential');
     writeFileSync(join(f.stateDir, 'job.json'), JSON.stringify({ type: 'opencode-update', phase: 'failed', recoveryRequired: false }), { mode: 0o600 });
-    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ password, acknowledge: true, version: '2.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
-    assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'password', 'version']);
+    assert.equal((await request('/web-login/api/opencode-install', { ...options, body: JSON.stringify({ acknowledge: true, version: '2.0.0', command: 'arbitrary', url: 'https://attacker.example' }) })).status, 202);
+    assert.deepEqual(Object.keys(forwarded).sort(), ['acknowledge', 'operation', 'version']);
     assert.equal(JSON.parse(readFileSync(join(f.stateDir, 'job.json'))).version, '2.0.0');
   } finally {
     store.close(); await gateway.close(); helper.closeAllConnections(); backend.closeAllConnections(); await Promise.all([new Promise(done => helper.close(done)), new Promise(done => backend.close(done))]); f.close();

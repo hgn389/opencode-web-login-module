@@ -280,5 +280,8 @@
   "m279": "Onaylamak için mevcut OpenCode şifresi",
   "m280": "OpenCode yapılandırmasını yeniden yüklemeyi kabul ediyorum; Bekleyen onay talepleri iptal edilebilir.",
   "m281": "Sağlayıcıyı kaydet",
-  "m282": "Sağlayıcıyı sil"
+  "m282": "Sağlayıcıyı sil",
+  "m283": "Bağlı sağlayıcılar",
+  "m284": "Henüz sağlayıcı yok.",
+  "m285": "Düzenle"
 }

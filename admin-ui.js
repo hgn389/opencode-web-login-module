@@ -2,6 +2,7 @@ import { i18n } from '/login/i18n-client.js';
 
 (() => {
   'use strict';
+  if (window.parent !== window && window.frameElement?.closest('.web-login-dialog')) document.documentElement.dataset.embedded = 'true';
   const notice = document.querySelector('#notice');
   const passwordPage = location.pathname.endsWith('/password');
   const nativePage = location.pathname.endsWith('/opencode');
@@ -12,9 +13,24 @@ import { i18n } from '/login/i18n-client.js';
   let csrf, busy = false, available = false, timer, reconnecting = false, watchingJob = false, nativeInfo, nativeLocked;
   let providerData, providerRevision, providerLocked, providerPendingId;
   const providerForm = document.querySelector('#provider-form');
+  const providerEditor = document.querySelector('#provider-editor');
+  const providerList = document.querySelector('#provider-list');
+  const noticeHome = notice.parentNode, noticeAnchor = notice.nextSibling;
+  let selectedProviderId = '', editorTrigger;
   const maximumProviderModels = 2000;
   const modelRows = () => [...document.querySelectorAll('.provider-model-row')];
-  const message = text => { i18n.text(notice, () => (text)); };
+  let toastTimer, autoScanTimer, connectionVersion = 0, scannedVersion = -1, automaticScanning = false;
+  const message = text => {
+    clearTimeout(toastTimer);
+    notice.hidden = !text;
+    i18n.text(notice, () => text);
+    if (text) toastTimer = setTimeout(() => { notice.hidden = true; i18n.text(notice, ''); }, 2000);
+  };
+  providerForm.addEventListener('invalid', event => {
+    const control = event.target;
+    const label = control.closest('label')?.textContent.trim();
+    message(`${label ? label + ': ' : ''}${control.validationMessage}`);
+  }, true);
   async function call(operation, fields) {
     const response = await fetch(`/web-login/api/${operation}`, {
       method: fields === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -41,7 +57,7 @@ import { i18n } from '/login/i18n-client.js';
       available = false;
       document.querySelectorAll('form button, #check-update, #native-check').forEach(button => { button.disabled = true; });
       document.querySelector('#provider-refresh').disabled = true;
-      if (providersPage) providerForm.querySelectorAll('input, select, button').forEach(control => { control.disabled = true; });
+      if (providersPage) lockProvider();
       if ([401, 403].includes(error.status)) { clearTimeout(timer); message(error.message); return; }
       reconnecting = true;
       message('Tạm mất kết nối với dịch vụ. Đang chờ kết nối lại để kiểm tra trạng thái.');
@@ -52,27 +68,31 @@ import { i18n } from '/login/i18n-client.js';
     if (data.csrf) csrf = data.csrf;
     available = data.available;
     const running = ['starting', 'running'].includes(data.job?.phase);
-    if (['succeeded', 'failed'].includes(data.job?.phase)) watchingJob = false;
+    if (['succeeded', 'failed'].includes(data.job?.phase)) {
+      if (watchingJob && data.job.message) message(data.job.message);
+      watchingJob = false;
+    }
     const locked = running || watchingJob || data.job?.recoveryRequired;
     document.querySelectorAll('form button').forEach(button => { button.disabled = busy || !available || locked; });
     document.querySelectorAll('#check-update, #native-check').forEach(button => { button.disabled = busy || !available; });
     clearTimeout(timer);
     if (running || watchingJob) scheduleRefresh();
-    if (!available) { message(data.message || 'Chưa bật dịch vụ quản trị. Cài lại module bằng bộ cài Linux để sử dụng.'); return; }
+    if (!available) {
+      message(data.message || 'Chưa bật dịch vụ quản trị. Cài lại module bằng bộ cài Linux để sử dụng.');
+      if (providersPage) {
+        i18n.text(document.querySelector('#provider-info'), () => data.message || 'Chưa bật dịch vụ quản trị. Cài lại module bằng bộ cài Linux để sử dụng.');
+        lockProvider();
+      }
+      return;
+    }
     if (passwordPage) return;
     if (providersPage) {
       providerData = data.providers || {}; providerLocked = locked;
-      const picker = document.querySelector('#provider-picker'), selected = picker.value;
-      picker.replaceChildren(i18n.option(() => ('Thêm nhà cung cấp mới'), ''), ...(providerData.providers || []).map(provider => {
-        const option = i18n.option(() => (`${provider.name} (${provider.id})${provider.editable ? '' : i18n.t(' — kiểu cấu hình khác')}`), provider.id);
-        option.disabled = !provider.editable; return option;
-      }));
-      if ([...picker.options].some(option => option.value === selected && !option.disabled)) picker.value = selected;
-      if (providerRevision === undefined && providerData.supported) fillProvider('');
-      if (providerPendingId !== undefined && data.job?.phase === 'succeeded') { fillProvider((providerData.providers || []).some(provider => provider.id === providerPendingId) ? providerPendingId : ''); providerPendingId = undefined; }
+      renderProviders();
+      if (providerPendingId !== undefined && data.job?.phase === 'succeeded') { providerPendingId = undefined; closeProviderEditor(); }
       if (data.job?.phase === 'failed') providerPendingId = undefined;
-      i18n.text(document.querySelector('#provider-info'), () => (providerData.supported ? 'Cấu hình OpenAI-compatible được lưu vào tệp JSON/JSONC của OpenCode. API key đã lưu không hiển thị lại.' : providerData.reason || 'Chưa đọc được cấu hình nhà cung cấp.'));
-      i18n.text(document.querySelector('#provider-job'), () => (data.job?.message || ''));
+      i18n.text(document.querySelector('#provider-info'), () => (providerData.supported ? '' : providerData.reason || 'Chưa đọc được cấu hình nhà cung cấp.'));
+      i18n.text(document.querySelector('#provider-job'), () => (data.job?.type === 'providers' && data.job.phase !== 'succeeded' ? data.job.message || '' : ''));
       lockProvider(); return;
     }
     if (nativePage) {
@@ -132,14 +152,71 @@ import { i18n } from '/login/i18n-client.js';
     drawNativeTarget();
   });
   function lockProvider() {
-    const disabled = busy || !available || providerLocked || !providerData?.supported;
-    providerForm.querySelectorAll('input, button').forEach(control => { control.disabled = disabled; });
-    document.querySelector('#provider-picker').disabled = disabled;
+    const locked = !available || providerLocked || !providerData?.supported;
+    const disabled = busy || locked;
+    providerForm.querySelectorAll('input, button').forEach(control => { control.disabled = locked || busy && (!automaticScanning || control.tagName === 'BUTTON'); });
+    document.querySelector('#provider-new').disabled = disabled;
+    providerList.querySelectorAll('button').forEach(button => { button.disabled = disabled || button.dataset.editable !== 'true'; });
     document.querySelector('#provider-refresh').disabled = busy || !available || providerLocked;
-    providerForm.elements.remove.disabled = disabled || !document.querySelector('#provider-picker').value;
+    providerForm.elements.remove.disabled = disabled || !selectedProviderId;
     document.querySelector('#provider-add-model').disabled = disabled || modelRows().length >= maximumProviderModels;
-    providerForm.elements.apiKey.disabled = disabled || providerForm.elements.clearKey.checked;
+    providerForm.elements.apiKey.disabled = locked || busy && !automaticScanning || providerForm.elements.clearKey.checked;
   }
+  function renderProviders() {
+    const fragment = document.createDocumentFragment();
+    for (const provider of providerData.providers || []) {
+      const row = document.createElement('li'); row.className = 'provider-list-row'; row.dataset.providerId = provider.id;
+      const details = document.createElement('div'); details.className = 'provider-list-details';
+      const name = document.createElement('button'); name.type = 'button'; name.className = 'provider-list-name'; name.textContent = provider.name || provider.id;
+      const id = document.createElement('code'); id.textContent = provider.id; id.dir = 'ltr';
+      const meta = document.createElement('p'); meta.className = 'note';
+      i18n.text(meta, () => `${i18n.t('Model')}: ${provider.models?.length || 0}${provider.editable ? '' : i18n.t(' — kiểu cấu hình khác')}`);
+      details.append(name, id, meta);
+      const edit = document.createElement('button'); edit.type = 'button'; i18n.text(edit, 'Sửa'); i18n.attr(edit, 'aria-label', () => `${i18n.t('Sửa')} ${provider.name || provider.id}`);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'provider-list-delete'; i18n.text(remove, 'Xóa nhà cung cấp'); i18n.attr(remove, 'aria-label', () => `${i18n.t('Xóa nhà cung cấp')} · ${provider.name || provider.id}`);
+      for (const button of [name, edit]) {
+        button.dataset.editable = String(Boolean(provider.editable));
+        button.addEventListener('click', () => openProviderEditor(provider.id));
+      }
+      remove.dataset.editable = String(Boolean(provider.editable));
+      remove.addEventListener('click', () => openProviderEditor(provider.id, true));
+      const actions = document.createElement('div'); actions.className = 'provider-list-actions'; actions.append(edit, remove);
+      row.append(details, actions); fragment.append(row);
+    }
+    providerList.replaceChildren(fragment);
+    document.querySelector('#provider-empty').hidden = !providerData.supported || Boolean(providerData.providers?.length);
+    i18n.prune();
+  }
+  function openProviderEditor(id = '', deleting = false) {
+    if (busy || !available || providerLocked || !providerData?.supported) return;
+    const provider = providerData.providers?.find(provider => provider.id === id);
+    if (id && !provider?.editable) return;
+    editorTrigger = document.activeElement;
+    fillProvider(id);
+    providerEditor.toggleAttribute('data-delete', deleting);
+    providerForm.querySelectorAll('fieldset').forEach(fieldset => { fieldset.hidden = deleting; });
+    providerForm.elements.save.hidden = deleting;
+    const summary = document.querySelector('#provider-delete-summary'); summary.hidden = !deleting;
+    summary.textContent = deleting ? `${provider.name || provider.id} (${provider.id})` : '';
+    i18n.text(document.querySelector('#provider-editor-title'), () => deleting ? i18n.t('Xóa nhà cung cấp') : provider ? `${i18n.t('Sửa')} · ${provider.name || provider.id}` : 'Thêm nhà cung cấp mới');
+    providerEditor.append(notice);
+    providerEditor.showModal();
+    document.querySelector('.provider-editor-body').scrollTop = 0;
+    (deleting ? document.querySelector('#provider-editor-close') : providerForm.elements[provider ? 'providerName' : 'providerId']).focus({ preventScroll: true });
+  }
+  function closeProviderEditor() {
+    if (!providerEditor.open) return;
+    const previousId = selectedProviderId;
+    clearTimeout(autoScanTimer); connectionVersion++; scannedVersion = -1;
+    providerEditor.close(); noticeHome.insertBefore(notice, noticeAnchor);
+    providerForm.reset(); selectedProviderId = ''; providerRevision = undefined;
+    document.querySelector('#provider-models').replaceChildren(); i18n.prune();
+    if (editorTrigger?.isConnected) editorTrigger.focus();
+    else ([...providerList.children].find(row => row.dataset.providerId === previousId)?.querySelector('.provider-list-name') || document.querySelector('#provider-new')).focus();
+  }
+  document.querySelector('#provider-new').addEventListener('click', () => openProviderEditor());
+  document.querySelector('#provider-editor-close').addEventListener('click', closeProviderEditor);
+  providerEditor.addEventListener('cancel', event => { event.preventDefault(); closeProviderEditor(); });
   function modelCount() {
     const rows = modelRows(), count = rows.filter(row => row.querySelector('[data-model-selected]').checked).length;
     i18n.text(document.querySelector('#provider-model-count'), () => (`Đã chọn ${count} / ${rows.length} model.`));
@@ -151,13 +228,14 @@ import { i18n } from '/login/i18n-client.js';
     const choiceText = document.createElement('span'); i18n.text(choiceText, 'Chọn');
     choice.append(checkbox, choiceText); row.append(choice);
     for (const [field, title] of [['id', 'Model ID'], ['name', 'Tên hiển thị model']]) {
-      const label = document.createElement('label'); i18n.text(label, () => (title));
+      const label = document.createElement('label');
+      const caption = document.createElement('span'); caption.className = 'model-field-caption'; i18n.text(caption, () => title);
       const input = document.createElement('input'); input.type = 'text'; input.maxLength = 128; input.dataset.modelField = field; input.value = model[field] || ''; input.required = field === 'id' && selected; input.autocomplete = 'off'; input.dir = field === 'id' ? 'ltr' : 'auto';
       input.addEventListener('input', () => { providerForm.elements.acknowledge.checked = false; if (field === 'id') i18n.attr(checkbox, 'aria-label', () => (`Chọn model ${input.value || i18n.t('mới')}`)); });
-      label.append(input); row.append(label);
+      label.append(caption, input); row.append(label);
     }
     checkbox.addEventListener('change', () => { row.querySelector('[data-model-field=id]').required = checkbox.checked; providerForm.elements.acknowledge.checked = false; modelCount(); });
-    const remove = document.createElement('button'); remove.type = 'button'; i18n.text(remove, () => ('Bỏ model'));
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'model-remove'; remove.textContent = '×'; i18n.attr(remove, 'aria-label', 'Bỏ model'); i18n.attr(remove, 'title', 'Bỏ model');
     remove.addEventListener('click', () => {
       if (modelRows().length > 1) row.remove();
       else { row.querySelectorAll('[data-model-field]').forEach(input => { input.value = ''; }); checkbox.checked = true; row.querySelector('[data-model-field=id]').required = true; }
@@ -170,8 +248,9 @@ import { i18n } from '/login/i18n-client.js';
     providerForm.elements.acknowledge.checked = false; modelCount();
   }
   function fillProvider(id) {
+    clearTimeout(autoScanTimer); connectionVersion++; scannedVersion = -1;
     const provider = providerData?.providers?.find(provider => provider.id === id);
-    document.querySelector('#provider-picker').value = provider?.id || '';
+    selectedProviderId = provider?.id || '';
     providerRevision = providerData?.revision;
     providerForm.reset();
     providerForm.elements.providerId.value = provider?.id || ''; providerForm.elements.providerId.readOnly = Boolean(provider);
@@ -189,32 +268,52 @@ import { i18n } from '/login/i18n-client.js';
     try { insecure = new URL(providerForm.elements.baseURL.value.trim()).protocol === 'http:'; } catch { /* URL validation runs before requests. */ }
     document.querySelector('#provider-http').hidden = !insecure; providerForm.elements.allowHttp.required = insecure;
   }
-  document.querySelector('#provider-picker').addEventListener('change', event => fillProvider(event.target.value));
   document.querySelector('#provider-add-model').addEventListener('click', () => { if (modelRows().length < maximumProviderModels) modelRow(); providerForm.elements.acknowledge.checked = false; lockProvider(); modelCount(); });
   providerForm.elements.baseURL.addEventListener('input', () => { providerForm.elements.allowHttp.checked = false; providerForm.elements.allowPrivate.checked = false; providerForm.elements.acknowledge.checked = false; i18n.text(document.querySelector('#provider-scan-status'), () => ('')); httpConfirmation(); });
   providerForm.elements.clearKey.addEventListener('change', () => { if (providerForm.elements.clearKey.checked) providerForm.elements.apiKey.value = ''; lockProvider(); });
+  function scheduleAutomaticScan() {
+    clearTimeout(autoScanTimer);
+    if (!providersPage) return;
+    autoScanTimer = setTimeout(() => {
+      if (!providerEditor.open || providerEditor.hasAttribute('data-delete') || document.hidden || busy || !available || providerLocked || !providerData?.supported || scannedVersion === connectionVersion) return;
+      const { baseURL, apiKey, allowHttp, clearKey, providerId } = providerForm.elements;
+      if ([baseURL, apiKey].includes(document.activeElement) || !baseURL.value.trim() || !baseURL.checkValidity() || !apiKey.value.trim() || clearKey.checked || allowHttp.required && !allowHttp.checked || providerId.value && !providerId.checkValidity()) return;
+      scanModels({ automatic: true });
+    }, 1000);
+  }
+  for (const name of ['baseURL', 'apiKey', 'providerId']) {
+    const control = providerForm.elements[name];
+    control.addEventListener('input', () => { connectionVersion++; providerForm.elements.acknowledge.checked = false; scheduleAutomaticScan(); });
+    control.addEventListener('change', scheduleAutomaticScan);
+    control.addEventListener('blur', scheduleAutomaticScan);
+  }
+  for (const name of ['allowHttp', 'allowPrivate', 'clearKey']) providerForm.elements[name].addEventListener('change', () => { connectionVersion++; scheduleAutomaticScan(); });
   document.querySelector('#provider-refresh').addEventListener('click', async event => {
     event.target.disabled = true;
-    try { await refresh(); fillProvider(document.querySelector('#provider-picker').value); message('Đã tải lại danh sách và cấu hình nhà cung cấp.'); }
+    try { await refresh(); message('Đã tải lại danh sách và cấu hình nhà cung cấp.'); }
     catch (error) { message(error.message); }
     finally { lockProvider(); }
   });
   document.querySelector('#provider-select-all').addEventListener('click', () => chooseModels(true));
   document.querySelector('#provider-uncheck-all').addEventListener('click', () => chooseModels(false));
-  document.querySelector('#provider-scan-models').addEventListener('click', async () => {
-    if (busy || !available || providerLocked || !providerData?.supported) return;
-    if (!providerForm.elements.baseURL.reportValidity()) return;
-    if (providerForm.elements.allowHttp.required && !providerForm.elements.allowHttp.checked) { message('Vui lòng xác nhận dùng HTTP trước khi quét model.'); providerForm.elements.allowHttp.focus(); return; }
-    if (!providerForm.elements.password.value) { message('Nhập mật khẩu OpenCode hiện tại ở bên dưới để quét model.'); providerForm.elements.password.focus(); return; }
-    const fields = { password: providerForm.elements.password.value, revision: providerRevision, provider: {
+  async function scanModels({ automatic = false } = {}) {
+    clearTimeout(autoScanTimer);
+    const status = document.querySelector('#provider-scan-status');
+    const scanMessage = text => { i18n.text(status, () => text); message(text); };
+    if (!providerEditor.open || busy || !available || providerLocked || !providerData?.supported) return;
+    if (!providerForm.elements.baseURL.reportValidity()) { scanMessage(providerForm.elements.baseURL.validationMessage); return; }
+    if (providerForm.elements.allowHttp.required && !providerForm.elements.allowHttp.checked) { scanMessage('Vui lòng xác nhận dùng HTTP trước khi quét model.'); providerForm.elements.allowHttp.focus(); return; }
+    const fields = { revision: providerRevision, provider: {
       id: providerForm.elements.providerId.value.trim(), baseURL: providerForm.elements.baseURL.value.trim(), apiKey: providerForm.elements.apiKey.value.trim(), clearKey: providerForm.elements.clearKey.checked,
       allowHttp: providerForm.elements.allowHttp.checked, allowPrivate: providerForm.elements.allowPrivate.checked,
     } };
-    const status = document.querySelector('#provider-scan-status');
-    busy = true; lockProvider(); i18n.text(status, () => ('Đang lấy danh sách model từ nhà cung cấp…'));
+    const version = connectionVersion;
+    scannedVersion = version;
+    busy = true; automaticScanning = automatic; lockProvider(); i18n.text(status, () => ('Đang lấy danh sách model từ nhà cung cấp…'));
     try {
       await refresh();
       const data = await call('provider-models', fields);
+      if (version !== connectionVersion) return;
       const rows = modelRows(), existing = new Set(rows.map(row => row.querySelector('[data-model-field=id]').value.trim()));
       const added = data.models.filter(model => !existing.has(model.id));
       const empty = rows.filter(row => ![...row.querySelectorAll('[data-model-field]')].some(input => input.value.trim()));
@@ -228,14 +327,25 @@ import { i18n } from '/login/i18n-client.js';
       modelCount();
       i18n.text(status, () => (`Quét được ${data.models.length} model, thêm ${added.length} model mới vào biểu mẫu.${data.skipped ? ` Bỏ qua ${data.skipped} mục trùng hoặc không hợp lệ.` : ''} Các lựa chọn và tên model đang có được giữ lại. Chưa lưu cấu hình.`));
       message('Đã quét model. Dùng Select All hoặc Uncheck All, chọn model cần dùng rồi lưu nhà cung cấp.');
-    } catch (error) { i18n.text(status, () => (error.message)); message(error.message); }
-    finally { busy = false; lockProvider(); }
-  });
+    } catch (error) {
+      if (version === connectionVersion) {
+        scanMessage(error.message);
+        if (!automatic) status.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+    finally {
+      busy = false; automaticScanning = false; lockProvider();
+      if (automatic && version !== connectionVersion) scheduleAutomaticScan();
+    }
+  }
+  document.querySelector('#provider-scan-models').addEventListener('click', scanModels);
+  window.addEventListener('pagehide', () => { clearTimeout(toastTimer); clearTimeout(autoScanTimer); clearTimeout(timer); notice.hidden = true; });
+  window.addEventListener('pageshow', event => { if (event.persisted) refreshWithRetry(); });
   providerForm.addEventListener('submit', async event => {
-    event.preventDefault(); if (busy || !available || !providerData?.supported || providerLocked) return;
-    if (!providerForm.elements.password.value || !providerForm.elements.acknowledge.checked) { message('Nhập mật khẩu hiện tại và xác nhận đồng ý tải lại cấu hình trước khi lưu hoặc xóa.'); return; }
-    const remove = event.submitter?.name === 'remove', id = providerForm.elements.providerId.value.trim();
-    const fields = { password: providerForm.elements.password.value, acknowledge: true, revision: providerRevision };
+    event.preventDefault(); if (!providerEditor.open || busy || !available || !providerData?.supported || providerLocked) return;
+    if (!providerForm.elements.acknowledge.checked) { message('Vui lòng tải lại danh sách và xác nhận đồng ý tải lại cấu hình OpenCode.'); return; }
+    const remove = providerEditor.hasAttribute('data-delete') || event.submitter?.name === 'remove', id = providerForm.elements.providerId.value.trim();
+    const fields = { acknowledge: true, revision: providerRevision };
     if (remove) fields.id = id;
     else fields.provider = { id, name: providerForm.elements.providerName.value.trim(), baseURL: providerForm.elements.baseURL.value.trim(), apiKey: providerForm.elements.apiKey.value.trim(), clearKey: providerForm.elements.clearKey.checked, allowHttp: providerForm.elements.allowHttp.checked,
       models: modelRows().filter(row => row.querySelector('[data-model-selected]').checked).map(row => Object.fromEntries([...row.querySelectorAll('[data-model-field]')].map(input => [input.dataset.modelField, input.value.trim()]))) };
@@ -244,7 +354,7 @@ import { i18n } from '/login/i18n-client.js';
     try {
       await refresh();
       const data = await call(remove ? 'provider-remove' : 'provider-save', fields);
-      providerForm.elements.apiKey.value = ''; providerForm.elements.password.value = ''; providerForm.elements.acknowledge.checked = false;
+      providerForm.elements.apiKey.value = ''; providerForm.elements.acknowledge.checked = false;
       watchingJob = true; providerPendingId = id; message(data.message);
     } catch (error) { message(error.message); }
     finally { busy = false; refreshWithRetry(); }
@@ -260,13 +370,13 @@ import { i18n } from '/login/i18n-client.js';
     if (form === providerForm) return;
     event.preventDefault();
     if (busy || !available) return;
-    const password = form.elements.password.value;
     const operation = form.id === 'password-form' ? 'password' : form.id === 'native-form' ? form.elements.version.value ? 'opencode-install' : 'opencode-update' : event.submitter?.name === 'install' ? 'update' : 'preferences';
-    const fields = { password };
+    const fields = {};
     if (operation === 'opencode-install') fields.version = form.elements.version.value;
     if (operation === 'password') {
       if (form.elements.newPassword.value !== form.elements.confirmPassword.value) { message('Hai ô mật khẩu mới chưa khớp.'); return; }
-      fields.newPassword = form.elements.newPassword.value; fields.confirmPassword = form.elements.confirmPassword.value;
+      if (!form.elements.acknowledge.checked) { message('Vui lòng xác nhận đã lưu công việc và đồng ý khởi động lại OpenCode.'); return; }
+      fields.newPassword = form.elements.newPassword.value; fields.confirmPassword = form.elements.confirmPassword.value; fields.acknowledge = true;
     }
     if (['update', 'opencode-update', 'opencode-install'].includes(operation)) {
       if (!form.elements.acknowledge.checked) { message('Vui lòng xác nhận đã lưu công việc trước khi cập nhật.'); return; }
@@ -289,6 +399,7 @@ import { i18n } from '/login/i18n-client.js';
     finally { busy = false; if (!form.hidden) refreshWithRetry(); }
   });
   document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && providerEditor.open) { event.preventDefault(); event.stopPropagation(); closeProviderEditor(); return; }
     if (event.key === 'Escape' && window.parent !== window) window.parent.postMessage({ type: 'web-login-close' }, location.origin);
   });
   if (providersPage) lockProvider();

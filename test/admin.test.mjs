@@ -83,7 +83,7 @@ test('update extraction verifies digest, full manifest, identity and rejects tra
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('administration requires actual password, keeps automatic updates off, persists settings and serializes changes', async () => {
+test('administration uses the existing session, keeps automatic updates off, persists settings and serializes changes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'login-admin-controller-'));
   const installDirectory = join(dir, 'code'); mkdirSync(installDirectory);
   writeFileSync(join(installDirectory, 'package.json'), JSON.stringify({ version: '1.0.0-beta' }));
@@ -98,21 +98,21 @@ test('administration requires actual password, keeps automatic updates off, pers
     const controller = createAdminController(config, deps);
     assert.equal((await controller.call({ operation: 'status' })).preferences.automatic, false);
     await controller.automatic(); assert.equal(checks, 0);
-    assert.equal((await controller.call({ operation: 'preferences', password: 'native_session_token', automatic: true, channel: 'beta' })).status, 401);
-    assert.equal((await controller.call({ operation: 'preferences', password: currentPassword, automatic: true, channel: 'attacker' })).status, 422);
-    assert.equal((await controller.call({ operation: 'preferences', password: currentPassword, automatic: false, channel: 'beta' })).status, 200);
+    assert.equal((await controller.call({ operation: 'preferences', automatic: false, channel: 'beta' })).status, 200);
+    assert.equal((await controller.call({ operation: 'preferences', automatic: true, channel: 'attacker' })).status, 422);
+    assert.equal((await controller.call({ operation: 'preferences', automatic: false, channel: 'beta' })).status, 200);
     assert.equal((await createAdminController(config, deps).call({ operation: 'status' })).preferences.channel, 'beta');
     await controller.call({ operation: 'check' }); assert.equal(channel, 'beta'); assert.equal(launches, 0);
-    assert.equal((await controller.call({ operation: 'password', password: currentPassword, newPassword: 'short', confirmPassword: 'short' })).status, 422);
-    assert.equal((await controller.call({ operation: 'password', password: currentPassword, newPassword: nextPassword, confirmPassword: nextPassword })).status, 202);
-    assert.equal((await controller.call({ operation: 'update', password: currentPassword })).status, 409);
+    assert.equal((await controller.call({ operation: 'password', acknowledge: true, newPassword: 'short', confirmPassword: 'short' })).status, 422);
+    assert.equal((await controller.call({ operation: 'password', acknowledge: true, newPassword: nextPassword, confirmPassword: nextPassword })).status, 202);
+    assert.equal((await controller.call({ operation: 'update' })).status, 409);
     await sleep(600); assert.equal(rotations, 1);
     assert.equal((await controller.call({ operation: 'status' })).job.phase, 'succeeded');
-    await controller.call({ operation: 'preferences', password: currentPassword, automatic: true, channel: 'stable' });
+    assert.equal((await controller.call({ operation: 'password', newPassword: nextPassword, confirmPassword: nextPassword })).status, 422);
+    assert.equal((await controller.call({ operation: 'password', acknowledge: true, newPassword: currentPassword, confirmPassword: currentPassword })).status, 422);
+    await controller.call({ operation: 'preferences', automatic: true, channel: 'stable' });
     await controller.automatic(); assert.equal(launches, 1); assert.equal(channel, 'stable');
     await controller.automatic(); assert.equal(launches, 1);
-    for (let i = 0; i < 15; i++) await controller.call({ operation: 'password', password: 'incorrect' });
-    assert.equal((await controller.call({ operation: 'password', password: 'incorrect' })).status, 429);
     assert.equal(validPassword('short'), false); assert.equal(validPassword(nextPassword + '\n'), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -182,7 +182,8 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
   const helper = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     const data = JSON.parse(Buffer.concat(chunks)); calls++;
-    const status = data.operation === 'password' ? data.password === currentPassword ? 202 : 401 : 200;
+    assert.equal(Object.hasOwn(data, 'password'), false);
+    const status = data.operation === 'password' ? 202 : 200;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ status, available: true, version: '1.0.0-beta', preferences: { automatic: false, channel: 'stable' }, message: 'Fixture' }));
   });
@@ -201,7 +202,7 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
     assert.equal(calls, 0);
     const status = await (await request('/web-login/api/status')).json();
     assert(status.csrf);
-    const options = { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-web-login-csrf': status.csrf }, body: JSON.stringify({ password: currentPassword, newPassword: nextPassword, confirmPassword: nextPassword }) };
+    const options = { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-web-login-csrf': status.csrf }, body: JSON.stringify({ newPassword: nextPassword, confirmPassword: nextPassword, acknowledge: true }) };
     assert.equal((await request('/web-login/api/password', { ...options, headers: { ...options.headers, 'x-web-login-csrf': 'forged' } })).status, 403);
     assert.equal((await request('/web-login/api/password', { ...options, headers: { ...options.headers, cookie: `opencode_login_${port}=${second}` } })).status, 403);
     assert.equal(calls, 1);
@@ -214,10 +215,11 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
     assert(panelBody.includes(`OpenCode Web Login · v${version}`));
     assert(!panelBody.includes('{{VERSION}}'));
     assert.equal((await request('/web-login/admin-ui.js')).status, 200);
-    const wrong = await request('/web-login/api/password', { ...options, body: JSON.stringify({ password: 'native_fixture_token', newPassword: nextPassword, confirmPassword: nextPassword }) });
-    assert.equal(wrong.status, 401); assert.equal(store.state('127.0.0.1').failures, 1);
+    const anonymous = await fetch(origin + '/web-login/api/password', options);
+    assert.equal(anonymous.status, 401); assert.equal(store.state('127.0.0.1').failures, 0);
+    store.fail('127.0.0.1');
     assert.equal((await request('/web-login/api/password', options)).status, 202);
-    assert.equal(store.state('127.0.0.1').failures, 0, 'Successful password confirmation resets consecutive credential failures');
+    assert.equal(store.state('127.0.0.1').failures, 1, 'Administrative success must not reset failed login attempts');
     assert.equal(store.session(first, origin), undefined); assert.equal(store.session(second, origin), undefined);
     assert.equal((await request('/web-login/api/status')).status, 401);
     const third = store.createSession('third_native_fixture', origin);
@@ -231,5 +233,47 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
     store.close(); await login.close(); helper.closeAllConnections(); backend.closeAllConnections();
     await Promise.all([new Promise(resolve => helper.close(resolve)), new Promise(resolve => backend.close(resolve))]);
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('administrative commands reject backend-invalid sessions and logout during verification without changing login failure counts', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'admin-session-verification-'));
+  const socket = join(directory, 'admin.sock'); let calls = 0, backendStatus = 200, entered, release;
+  const helper = http.createServer(async (req, res) => {
+    for await (const chunk of req) { /* Consume the bounded request. */ }
+    calls++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ status: 200, available: true }));
+  });
+  let wait;
+  const backend = http.createServer(async (req, res) => {
+    assert.equal(req.url, '/api/info'); assert(req.headers.authorization?.startsWith('Basic '));
+    if (wait) { entered(); await wait; }
+    res.writeHead(backendStatus, { 'content-type': 'application/json' }); res.end('{}');
+  });
+  helper.listen(socket); backend.listen(0, '127.0.0.1'); await Promise.all([once(helper, 'listening'), once(backend, 'listening')]);
+  const reserve = net.createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening'); const port = reserve.address().port; await new Promise(resolve => reserve.close(resolve));
+  const origin = `http://127.0.0.1:${port}`, database = join(directory, 'state.sqlite');
+  const gateway = createLoginServer({ port, backendPort: backend.address().port, statePath: database, adminSocket: socket });
+  const store = new SecurityStore(database); await gateway.listen();
+  const prepare = async () => {
+    const session = store.createSession('isolated-admin-session', origin), cookie = `opencode_login_${port}=${session}`;
+    const status = await (await fetch(origin + '/web-login/api/status', { headers: { cookie, 'x-opencode-login': '1' } })).json();
+    return { session, options: { method: 'POST', headers: { cookie, origin, 'x-opencode-login': '1', 'x-web-login-csrf': status.csrf, 'content-type': 'application/json' }, body: JSON.stringify({ automatic: false, channel: 'stable' }) } };
+  };
+  try {
+    store.fail('127.0.0.1');
+    const first = await prepare(), before = calls; backendStatus = 401;
+    const rejected = await fetch(origin + '/web-login/api/preferences', first.options);
+    assert.equal(rejected.status, 401); assert((await rejected.json()).loginRequired);
+    assert.equal(calls, before); assert.equal(store.session(first.session, origin), undefined);
+    assert.equal(store.state('127.0.0.1').failures, 1);
+    backendStatus = 200; const second = await prepare();
+    wait = new Promise(resolve => { release = resolve; }); const verifying = new Promise(resolve => { entered = resolve; });
+    const pending = fetch(origin + '/web-login/api/preferences', second.options); await verifying;
+    const beforeLogout = calls; store.revoke(second.session); release();
+    assert.equal((await pending).status, 401); assert.equal(calls, beforeLogout);
+    assert.equal(store.state('127.0.0.1').failures, 1);
+  } finally {
+    if (release) release(); store.close(); await gateway.close(); helper.closeAllConnections(); backend.closeAllConnections();
+    await Promise.all([new Promise(resolve => helper.close(resolve)), new Promise(resolve => backend.close(resolve))]); rmSync(directory, { recursive: true, force: true });
   }
 });

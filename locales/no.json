@@ -280,5 +280,8 @@
   "m279": "Gjeldende OpenCode passord for å bekrefte",
   "m280": "Jeg godtar å laste OpenCode-konfigurasjonen på nytt; ventende forespørsler om godkjenning kan bli kansellert.",
   "m281": "Lagre leverandør",
-  "m282": "Slett leverandør"
+  "m282": "Slett leverandør",
+  "m283": "Tilkoblede leverandører",
+  "m284": "Ingen leverandører ennå.",
+  "m285": "Rediger"
 }
