@@ -283,5 +283,11 @@
   "m282": "Hapus penyedia",
   "m283": "Penyedia yang terhubung",
   "m284": "Belum ada penyedia.",
-  "m285": "Edit"
+  "m285": "Edit",
+  "m286": "Tampilkan di pemilih model",
+  "m287": "Model baru disembunyikan secara bawaan. Aktifkan, simpan, lalu muat ulang OpenCode. Hanya berlaku di peramban ini.",
+  "m288": "Muat ulang OpenCode",
+  "m289": "Penyimpanan peramban tidak tersedia. Izinkan penyimpanan dan coba lagi.",
+  "m290": "Perubahan disimpan otomatis di peramban ini. Muat ulang OpenCode untuk menerapkannya.",
+  "m291": "Visibilitas model disimpan."
 }

@@ -283,5 +283,11 @@
   "m282": "Obriši provajdera",
   "m283": "Povezani pružaoci usluga",
   "m284": "Još nema pružalaca usluga.",
-  "m285": "Uredi"
+  "m285": "Uredi",
+  "m286": "Prikaži u izboru modela",
+  "m287": "Novi modeli su zadano skriveni. Uključite, sačuvajte pa ponovo učitajte OpenCode. Samo za ovaj preglednik.",
+  "m288": "Ponovo učitaj OpenCode",
+  "m289": "Pohrana preglednika nije dostupna. Dozvolite pohranu i pokušajte ponovo.",
+  "m290": "Promjene se automatski čuvaju u ovom pregledniku. Ponovo učitajte OpenCode da ih primijenite.",
+  "m291": "Vidljivost modela je sačuvana."
 }

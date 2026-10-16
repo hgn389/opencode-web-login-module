@@ -283,5 +283,11 @@
   "m282": "Dzēst pakalpojumu sniedzēju",
   "m283": "Pievienotie pakalpojumu sniedzēji",
   "m284": "Vēl nav pakalpojumu sniedzēju.",
-  "m285": "Rediģēt"
+  "m285": "Rediģēt",
+  "m286": "Rādīt modeļu izvēlnē",
+  "m287": "Jaunie modeļi pēc noklusējuma ir paslēpti. Ieslēdziet, saglabājiet un pārlādējiet OpenCode. Tikai šajā pārlūkā.",
+  "m288": "Pārlādēt OpenCode",
+  "m289": "Pārlūka krātuve nav pieejama. Atļaujiet glabāšanu un mēģiniet vēlreiz.",
+  "m290": "Izmaiņas tiek automātiski saglabātas šajā pārlūkā. Pārlādējiet OpenCode, lai tās lietotu.",
+  "m291": "Modeļu redzamība saglabāta."
 }

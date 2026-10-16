@@ -283,5 +283,11 @@
   "m282": "Izbriši ponudnika",
   "m283": "Povezani ponudniki",
   "m284": "Ponudnikov še ni.",
-  "m285": "Uredi"
+  "m285": "Uredi",
+  "m286": "Prikaži v izbirniku modelov",
+  "m287": "Novi modeli so privzeto skriti. Omogočite, shranite in znova naložite OpenCode. Samo za ta brskalnik.",
+  "m288": "Znova naloži OpenCode",
+  "m289": "Shramba brskalnika ni na voljo. Dovolite shranjevanje in poskusite znova.",
+  "m290": "Spremembe se samodejno shranijo v tem brskalniku. Za uveljavitev znova naložite OpenCode.",
+  "m291": "Vidnost modelov shranjena."
 }

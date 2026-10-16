@@ -283,5 +283,11 @@
   "m282": "Suprimeix el proveïdor",
   "m283": "Proveïdors connectats",
   "m284": "Encara no hi ha proveïdors.",
-  "m285": "Edita"
+  "m285": "Edita",
+  "m286": "Mostra al selector de models",
+  "m287": "Els models nous estan ocults per defecte. Activa, desa i torna a carregar OpenCode. Només s'aplica a aquest navegador.",
+  "m288": "Torna a carregar OpenCode",
+  "m289": "L'emmagatzematge del navegador no està disponible. Permet-lo i torna-ho a provar.",
+  "m290": "Els canvis es desen automàticament en aquest navegador. Torna a carregar OpenCode per aplicar-los.",
+  "m291": "Visibilitat dels models desada."
 }

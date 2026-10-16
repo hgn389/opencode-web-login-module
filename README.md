@@ -4,11 +4,11 @@ Module độc lập cung cấp trang đăng nhập và bảo mật cho OpenCode.
 
 **Thứ tự cài đặt: cài OpenCode trước → cấu hình mật khẩu và dịch vụ OpenCode → cài module này → cấu hình domain/HTTPS nếu cần truy cập Internet.**
 
-**Bản thử nghiệm:** [v1.2.1-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.1-beta). Phiên bản gói: `1.2.1-beta`.
+**Bản thử nghiệm:** [v1.2.2-beta](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.2-beta). Phiên bản gói: `1.2.2-beta`.
 
-**v1.2.1-beta cải tiến quản lý provider: danh sách với nút Sửa/Xóa, popup thêm/sửa gọn hơn, tự quét model và thông báo đen 2 giây. Các thao tác quản trị dùng phiên đăng nhập, không cần nhập lại mật khẩu; gateway kiểm tra phiên với OpenCode trước khi thực hiện lệnh. Hỗ trợ ID như `9router`, header chứa bốn tab và 63 ngôn ngữ. Tự động cập nhật module mặc định tắt; cập nhật/hạ cấp OpenCode luôn thực hiện thủ công.**
+**v1.2.2-beta bổ sung công tắc hiển thị model cho Custom Provider. Khối Show in model selector nằm ngay dưới Add new provider, hiển thị toàn bộ model theo nhóm nhà cung cấp, có thanh cuộn riêng và Select All / Uncheck All. Trạng thái dùng chung với Cài đặt → Mô hình trên trình duyệt hiện tại. Hỗ trợ 63 ngôn ngữ. Tự động cập nhật module mặc định tắt; cập nhật/hạ cấp OpenCode luôn thực hiện thủ công.**
 
-**Nâng cấp từ v1.1.2-beta trở xuống:** dùng quy trình nâng cấp thủ công ở bước 2. Bộ cập nhật qua web của các bản cũ từ chối những tệp mới ngoài danh sách đã đóng gói; không dùng nút **Cập nhật ngay** của bản cũ để cài lần chuyển này.
+**Nâng cấp từ v1.2.1-beta trở xuống:** dùng quy trình nâng cấp thủ công ở bước 2. Bộ cập nhật qua web của các bản cũ từ chối những tệp mới ngoài danh sách đã đóng gói; không dùng nút **Cập nhật ngay** của bản cũ để cài lần chuyển này.
 
 ## Cài đặt và cấu hình
 
@@ -38,21 +38,21 @@ Dùng bản OpenCode v2 được cài theo phương thức chính thức và đ�
 ### 2. Tải mã nguồn module từ GitHub
 
 ```sh
-sudo git clone --branch v1.2.1-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
+sudo git clone --branch v1.2.2-beta https://github.com/hgn389/opencode-web-login-module.git /opt/opencode-web-login-src
 cd /opt/opencode-web-login-src
 sudo npm ci --omit=dev --ignore-scripts
 node bin/opencode-web-login.mjs --help
 ```
 
-Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.2.1-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
+Lệnh clone trên lấy đúng bản beta đã phát hành, bao gồm các bản sửa bảo mật và menu quản trị. Nếu muốn mã đang phát triển, thay `--branch v1.2.2-beta` bằng `--branch main`; nhánh `main` có thể có thay đổi chưa phát hành. `/opt/opencode-web-login-src` là thư mục mã nguồn. Bộ cài sẽ tạo thư mục dịch vụ riêng tại `/opt/opencode-login`, nên không cần cài global bằng npm để dùng những lệnh dưới đây.
 
 #### Cài từ gói `.tgz` trên GitHub Release
 
-Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.2.1-beta.tgz` và `opencode-web-login-1.2.1-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.1-beta). Trong thư mục đã tải, chạy:
+Nếu muốn cài CLI global, tải hai tệp `opencode-web-login-1.2.2-beta.tgz` và `opencode-web-login-1.2.2-beta.tgz.sha256` từ [trang phát hành](https://github.com/hgn389/opencode-web-login-module/releases/tag/v1.2.2-beta). Trong thư mục đã tải, chạy:
 
 ```sh
-sha256sum --check opencode-web-login-1.2.1-beta.tgz.sha256
-sudo npm install -g --ignore-scripts ./opencode-web-login-1.2.1-beta.tgz
+sha256sum --check opencode-web-login-1.2.2-beta.tgz.sha256
+sudo npm install -g --ignore-scripts ./opencode-web-login-1.2.2-beta.tgz
 opencode-web-login --help
 ```
 
@@ -65,15 +65,15 @@ Nếu đã clone mã nguồn theo hướng dẫn, chạy trong thư mục mã ng
 ```sh
 cd /opt/opencode-web-login-src
 sudo git fetch origin --tags
-sudo git checkout --detach v1.2.1-beta
+sudo git checkout --detach v1.2.2-beta
 sudo npm ci --omit=dev --ignore-scripts
 ```
 
 Sau đó chạy lại lệnh **cài thật ở bước 3**, giữ nguyên các tùy chọn cài đặt đang dùng, gồm đường dẫn OpenCode, tên dịch vụ, địa chỉ/cổng, domain và trusted proxy nếu có. Chạy với `--dry-run` trước để kiểm tra. Bộ cài sao lưu, giữ cơ sở dữ liệu phiên/khóa IP và khôi phục khi thất bại. Nếu Git báo có thay đổi cục bộ, lưu hoặc xử lý chúng trước khi chuyển tag; không dùng tùy chọn ép ghi đè.
 
-Nếu đã cài CLI global từ `.tgz`, xác minh SHA-256 rồi cài gói `1.2.1-beta` như trên, sau đó chạy lại `sudo opencode-web-login install` với các tùy chọn cũ. Cài gói global chỉ thay CLI; cần bước `install` để cập nhật dịch vụ đang chạy.
+Nếu đã cài CLI global từ `.tgz`, xác minh SHA-256 rồi cài gói `1.2.2-beta` như trên, sau đó chạy lại `sudo opencode-web-login install` với các tùy chọn cũ. Cài gói global chỉ thay CLI; cần bước `install` để cập nhật dịch vụ đang chạy.
 
-Các bản từ `v1.1.2-beta` trở xuống cần quy trình thủ công này do bản mới bổ sung tệp chương trình và bản dịch. Bản cũ từ chối gói mới một cách an toàn, thay vì bỏ qua những tệp chưa biết. Không cần tắt kiểm tra gói hoặc mở cổng backend để nâng cấp.
+Các bản từ `v1.2.1-beta` trở xuống cần quy trình thủ công này vì bản mới bổ sung tệp `model-visibility.mjs`. Bản cũ từ chối gói mới một cách an toàn, thay vì bỏ qua những tệp chưa biết. Không cần tắt kiểm tra gói hoặc mở cổng backend để nâng cấp.
 
 ### 3. Cài module thành dịch vụ
 
@@ -167,7 +167,7 @@ Các chức năng quản trị dùng phiên đăng nhập hiện tại, không y
 
 Đăng nhập tạm dừng khi đang đổi mật khẩu, cập nhật OpenCode hoặc cần khôi phục tác vụ bị gián đoạn, không tính thành nhập sai. Nếu đã bật dịch vụ quản trị nhưng dịch vụ này không phản hồi, gateway tạm từ chối tạo phiên mới. Thu hồi toàn bộ phiên, kể cả bằng CLI, cũng vô hiệu hóa những lần đăng nhập đang xử lý để chúng không tạo lại phiên sau lệnh thu hồi.
 
-Nếu đang dùng bản module cũ, lấy tag `v1.2.1-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
+Nếu đang dùng bản module cũ, lấy tag `v1.2.2-beta` ở thư mục mã nguồn rồi chạy lại bước 3 với đầy đủ các tùy chọn cũ. Bản chạy độc lập bằng thư viện/CLI không tự có quyền quản trị; cần bộ cài Linux/systemd để bật đổi mật khẩu và cập nhật.
 
 #### Cập nhật OpenCode qua terminal
 
@@ -229,12 +229,15 @@ Mở **Cài đặt → Web Login Module → Nhà cung cấp tùy chỉnh**, ho�
    Popup thêm/sửa dùng bố cục gọn: các trường đặt thành hai cột trên màn hình rộng, một cột trên màn hình nhỏ; giảm khoảng cách và chiều cao ô nhập/nút bấm. Từng model dùng một dòng gọn trên desktop, hai ô xếp dọc trên điện thoại; nút **×** bỏ dòng model. Danh sách model cuộn trong khung riêng, giữ các xác nhận HTTP/LAN và thông tin trợ giúp.
 2. Nhập **ID**, **Tên hiển thị**, **Base URL** và API key nếu API yêu cầu. ID tối đa 63 ký tự, bắt đầu bằng chữ thường hoặc số, sau đó dùng chữ thường, số, dấu gạch ngang hoặc gạch dưới; ví dụ `9router`, `my-router` hoặc `my-openrouter`. Không dùng ID có sẵn của OpenCode như `openrouter`; chọn ID riêng để tránh ghi đè. URL mẫu `https://api.example.com/v1` cần thay theo dịch vụ thực tế.
 3. Sau khi nhập **Base URL** và **API key**, rời ô nhập để module tự quét sau khoảng **1 giây**. HTTP cần tích xác nhận trước; router localhost/LAN cần tích cho phép mạng nội bộ. Module không quét khi đang gõ trong ô URL/API key, không lặp lại cùng lượt nhập hoặc tự lưu cấu hình. Có thể bấm **Quét model** để thử lại, quét API không dùng khóa hoặc dùng khóa đã lưu; cũng có thể nhập Model ID thủ công. Dùng **Select All** để chọn tất cả, **Uncheck All** để bỏ chọn tất cả, sau đó đánh dấu các model cần dùng. Chỉ model được chọn mới được lưu; tối đa 2000 model. Tên hiển thị model là tùy chọn.
-4. Xác nhận đồng ý tải lại cấu hình rồi bấm **Lưu nhà cung cấp**. Module kiểm tra provider và model đã xuất hiện trong OpenCode, không gửi yêu cầu tạo nội dung có tính phí để thử API key.
-5. Khi lưu thành công, popup đóng và danh sách được cập nhật. Tải lại giao diện OpenCode và chọn model dạng `my-provider/MODEL_ID`. Để xóa, mở popup sửa provider, xác nhận rồi bấm **Xóa nhà cung cấp**. Nút **Đóng** hoặc phím **Esc** chỉ đóng popup thêm/sửa, đưa bạn về danh sách. Đóng popup khi đang quét sẽ bỏ qua kết quả quét đó; các ô chưa lưu và API key đang nhập được xóa khi đóng. Nếu đã gửi lệnh lưu/xóa, tác vụ vẫn hoàn tất và danh sách được cập nhật; lỗi lưu giữ popup đang mở để kiểm tra lại.
+4. Ngay dưới nút **Thêm nhà cung cấp mới / Add new provider** có khối **Hiển thị trong bộ chọn**. Toàn bộ model được hiển thị sẵn, chia nhóm theo nhà cung cấp, không cần chọn provider trong danh sách thả xuống. Danh sách có thanh cuộn riêng trong khối để không kéo dài popup. Bật/tắt từng model; thay đổi được lưu tự động cho trình duyệt hiện tại, không cần mở popup sửa provider hoặc tải lại cấu hình máy chủ. **Select All / Uncheck All** trong khối này bật/tắt toàn bộ model của tất cả provider đang hiển thị. Bấm **Tải lại OpenCode** để áp dụng vào bộ chọn model ở ô nhập prompt.
+
+   Trong popup thêm/sửa provider, ô chọn bên trái quyết định model nào được lưu vào cấu hình provider. Công tắc **Hiển thị trong bộ chọn** quyết định model nào xuất hiện trong danh sách model ở ô nhập prompt. Model mới, kể cả model vừa quét, mặc định tắt công tắc; bật những model muốn sử dụng. Tắt công tắc vẫn giữ model trong cấu hình. **Select All / Uncheck All** chỉ thay đổi ô chọn lưu cấu hình, không bật/tắt các công tắc.
+5. Khi thêm/sửa provider, xác nhận đồng ý tải lại cấu hình rồi bấm **Lưu nhà cung cấp**. Module kiểm tra provider và model đã xuất hiện trong OpenCode, không gửi yêu cầu tạo nội dung có tính phí để thử API key. Công tắc trong popup thêm/sửa chỉ được ghi sau khi lưu provider thành công; công tắc ở khối dưới **Add new provider** tự lưu riêng, không ghi lại cấu hình provider trên máy chủ.
+6. Khi lưu thành công, popup đóng và danh sách được cập nhật. Bấm **Tải lại OpenCode** để giao diện nạp lại bộ chọn, rồi chọn model dạng `my-provider/MODEL_ID`. Công tắc dùng cùng dữ liệu hiển thị với **Cài đặt → Mô hình** trên trình duyệt hiện tại; trình duyệt, thiết bị hoặc địa chỉ gateway khác có tùy chọn riêng. OpenCode giữ tùy chọn trong bộ nhớ khi đang mở nên cần tải lại trang sau khi lưu từ module; lưu công việc đang nhập trước khi bấm nút tải lại. Nếu bộ nhớ trình duyệt bị chặn hoặc đầy, module báo lỗi; cho phép lưu trữ rồi bấm nút tải lại để thử ghi lại tùy chọn, không cần lưu lại cấu hình provider. Để xóa provider, dùng nút **Xóa nhà cung cấp** trong danh sách hoặc popup sửa, xác nhận rồi bấm xóa. Nút **Đóng** hoặc phím **Esc** chỉ đóng popup thêm/sửa, đưa bạn về danh sách. Đóng popup khi đang quét sẽ bỏ qua kết quả quét đó; các ô chưa lưu và API key đang nhập được xóa khi đóng. Khi đang gửi hoặc xử lý lệnh lưu/xóa, nút đóng popup ngoài và chuyển tab tạm khóa để tránh mất tùy chọn hiển thị; đóng popup thêm/sửa bên trong vẫn cho phép tác vụ hoàn tất và danh sách được cập nhật; lỗi lưu giữ popup đang mở để kiểm tra lại.
 
 **Quét model:** hỗ trợ API danh sách model OpenAI-compatible, gồm [9router](https://github.com/decolua/9router), [OmniRoute](https://github.com/devolkus/omniroute) và [OpenRouter](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties). Với OpenRouter, Base URL là `https://openrouter.ai/api/v1`; với router tự triển khai, dùng `http://IP_SERVER:PORT/v1` hoặc URL HTTPS thực tế của router. Kết nối được thực hiện từ máy chủ chạy module; `localhost` chỉ máy chủ đó. Router localhost/LAN cần đánh dấu **Cho phép quét router trên máy chủ hoặc mạng nội bộ**; HTTP còn cần xác nhận dùng kết nối không mã hóa.
 
-Quét chỉ gọi `GET /models`, không gửi yêu cầu chat, không lưu provider và không khởi động lại OpenCode. Danh sách được gộp với model trong biểu mẫu, giữ nguyên tên và lựa chọn đang có, bỏ mục trùng/không hợp lệ. Model mới được chọn sẵn; hãy bỏ chọn những model không cần rồi xác nhận **Lưu nhà cung cấp**. Danh sách từ router có thể gồm model chưa được tài khoản của bạn cấp quyền; quét thành công không xác nhận khả năng gọi từng model. API không hỗ trợ `/models` vẫn có thể khai báo model thủ công.
+Quét chỉ gọi `GET /models`, không gửi yêu cầu chat, không lưu provider và không khởi động lại OpenCode. Danh sách được gộp với model trong biểu mẫu, giữ nguyên tên, lựa chọn lưu và công tắc đang có, bỏ mục trùng/không hợp lệ. Model mới được chọn sẵn để lưu nhưng công tắc hiển thị mặc định tắt; hãy bỏ chọn model không cần lưu và bật công tắc của model muốn thấy trong bộ chọn, rồi xác nhận **Lưu nhà cung cấp**. Danh sách từ router có thể gồm model chưa được tài khoản của bạn cấp quyền; quét thành công không xác nhận khả năng gọi từng model. API không hỗ trợ `/models` vẫn có thể khai báo model thủ công.
 
 Nếu bấm **Quét model** chưa có kết quả, đọc thông báo ngay dưới các nút quét/chọn model: module hiển thị tại đây cả lỗi Base URL, thiếu xác nhận HTTP và lỗi kết nối/API. API key là khóa do router cấp; quét model không cần nhập lại mật khẩu OpenCode. Base URL phải truy cập được từ máy chủ chạy module; không dùng `localhost` để chỉ một router đang chạy trên máy tính khác.
 

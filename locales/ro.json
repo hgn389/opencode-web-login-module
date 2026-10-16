@@ -283,5 +283,11 @@
   "m282": "Ștergeți furnizorul",
   "m283": "Furnizori conectați",
   "m284": "Nu există furnizori încă.",
-  "m285": "Editează"
+  "m285": "Editează",
+  "m286": "Afișează în selectorul de modele",
+  "m287": "Modelele noi sunt ascunse implicit. Activează, salvează și reîncarcă OpenCode. Doar pentru acest browser.",
+  "m288": "Reîncarcă OpenCode",
+  "m289": "Stocarea browserului nu este disponibilă. Permite stocarea și încearcă din nou.",
+  "m290": "Modificările sunt salvate automat în acest browser. Reîncarcă OpenCode pentru a le aplica.",
+  "m291": "Vizibilitatea modelelor a fost salvată."
 }

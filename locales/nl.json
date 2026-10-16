@@ -283,5 +283,11 @@
   "m282": "Aanbieder verwijderen",
   "m283": "Verbonden providers",
   "m284": "Nog geen providers.",
-  "m285": "Bewerken"
+  "m285": "Bewerken",
+  "m286": "Tonen in modelkiezer",
+  "m287": "Nieuwe modellen zijn standaard verborgen. Schakel in, sla op en herlaad OpenCode. Geldt alleen voor deze browser.",
+  "m288": "OpenCode herladen",
+  "m289": "Browseropslag is niet beschikbaar. Sta opslag toe en probeer opnieuw.",
+  "m290": "Wijzigingen worden automatisch opgeslagen in deze browser. Herlaad OpenCode om ze toe te passen.",
+  "m291": "Zichtbaarheid van modellen opgeslagen."
 }

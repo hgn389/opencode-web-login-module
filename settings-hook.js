@@ -3,13 +3,14 @@ import { i18n } from '/login/i18n-client.js';
 (() => {
   'use strict';
   const items = [['password', 'Đổi mật khẩu'], ['updates', 'Cập nhật Web Login Module'], ['opencode', 'Update & Downgrade'], ['providers', 'Nhà cung cấp tùy chỉnh']];
-  let dialog, frame, focusBefore;
+  let dialog, frame, focusBefore, providerPending = false;
   function close() {
-    if (!dialog) return;
+    if (!dialog || providerPending) return;
     dialog.close(); dialog.remove(); i18n.prune(dialog); dialog = null; frame = null;
     if (focusBefore?.isConnected) focusBefore.focus();
   }
   function open(id, title) {
+    if (providerPending) return;
     close(); focusBefore = document.activeElement;
     dialog = document.createElement('dialog'); dialog.className = 'web-login-dialog'; i18n.attr(dialog, 'aria-label', () => (title));
     const header = document.createElement('div'); header.className = 'web-login-dialog-header';
@@ -29,6 +30,7 @@ import { i18n } from '/login/i18n-client.js';
       link.addEventListener('click', event => {
         if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
+        if (providerPending) return;
         if (link.getAttribute('aria-current') === 'page') return;
         select(page, label); frame.src = link.href;
       });
@@ -78,8 +80,18 @@ import { i18n } from '/login/i18n-client.js';
     scheduled = true; requestAnimationFrame(attach);
   }).observe(document.body, { childList: true, subtree: true });
   window.addEventListener('message', event => {
-    if (event.origin === location.origin && event.source === frame?.contentWindow && event.data?.type === 'web-login-close') close();
+    if (event.origin !== location.origin || !frame || event.source !== frame.contentWindow) return;
+    if (event.data?.type === 'web-login-close') close();
+    if (event.data?.type === 'web-login-provider-pending' && typeof event.data.pending === 'boolean') {
+      providerPending = event.data.pending;
+      dialog.querySelector('.web-login-dialog-header>button').disabled = providerPending;
+      for (const link of dialog.querySelectorAll('.web-login-dialog-tabs a')) {
+        if (providerPending) link.setAttribute('aria-disabled', 'true');
+        else link.removeAttribute('aria-disabled');
+      }
+    }
   });
+  window.addEventListener('beforeunload', event => { if (providerPending) { event.preventDefault(); event.returnValue = ''; } });
   i18n.subscribe(locale => {
     frame?.contentWindow?.postMessage({ type: 'web-login-language', locale }, location.origin);
   });

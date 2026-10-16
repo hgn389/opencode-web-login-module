@@ -283,5 +283,11 @@
   "m282": "Provayderni o'chirish",
   "m283": "Ulangan provayderlar",
   "m284": "Hozircha provayderlar yo‘q.",
-  "m285": "Tahrirlash"
+  "m285": "Tahrirlash",
+  "m286": "Model tanlovida koʻrsatish",
+  "m287": "Yangi modellar odatda yashiriladi. Yoqing, saqlang va OpenCode-ni qayta yuklang. Faqat shu brauzer uchun.",
+  "m288": "OpenCode-ni qayta yuklash",
+  "m289": "Brauzer xotirasi mavjud emas. Saqlashga ruxsat bering va qayta urinib koʻring.",
+  "m290": "Oʻzgarishlar shu brauzerda avtomatik saqlanadi. Qoʻllash uchun OpenCode-ni qayta yuklang.",
+  "m291": "Modellar koʻrinishi saqlandi."
 }

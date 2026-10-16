@@ -283,5 +283,11 @@
   "m282": "Eyða veitu",
   "m283": "Tengdir þjónustuveitendur",
   "m284": "Engir þjónustuveitendur enn.",
-  "m285": "Breyta"
+  "m285": "Breyta",
+  "m286": "Sýna í líkanavali",
+  "m287": "Ný líkön eru falin sjálfgefið. Virkjaðu, vistaðu og endurhladdu OpenCode. Gildir aðeins í þessum vafra.",
+  "m288": "Endurhlaða OpenCode",
+  "m289": "Geymsla vafrans er ekki tiltæk. Leyfðu geymslu og reyndu aftur.",
+  "m290": "Breytingar vistast sjálfkrafa í þessum vafra. Endurhladdu OpenCode til að beita þeim.",
+  "m291": "Sýnileiki líkana vistaður."
 }

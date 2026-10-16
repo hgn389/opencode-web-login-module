@@ -283,5 +283,11 @@
   "m282": "Supprimer le fournisseur",
   "m283": "Fournisseurs connectés",
   "m284": "Aucun fournisseur pour le moment.",
-  "m285": "Modifier"
+  "m285": "Modifier",
+  "m286": "Afficher dans le sélecteur",
+  "m287": "Les nouveaux modèles sont masqués par défaut. Activez, enregistrez puis rechargez OpenCode. Uniquement dans ce navigateur.",
+  "m288": "Recharger OpenCode",
+  "m289": "Le stockage du navigateur est indisponible. Autorisez-le et réessayez.",
+  "m290": "Les modifications sont enregistrées automatiquement dans ce navigateur. Rechargez OpenCode pour les appliquer.",
+  "m291": "Visibilité des modèles enregistrée."
 }

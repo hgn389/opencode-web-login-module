@@ -283,5 +283,11 @@
   "m282": "Xóa nhà cung cấp",
   "m283": "Danh sách nhà cung cấp đang được kết nối",
   "m284": "Chưa có nhà cung cấp nào.",
-  "m285": "Sửa"
+  "m285": "Sửa",
+  "m286": "Hiển thị trong bộ chọn",
+  "m287": "Model mới mặc định tắt. Bật công tắc, lưu rồi tải lại OpenCode. Chỉ áp dụng trên trình duyệt này.",
+  "m288": "Tải lại OpenCode",
+  "m289": "Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.",
+  "m290": "Thay đổi được lưu tự động trên trình duyệt này. Tải lại OpenCode để áp dụng.",
+  "m291": "Đã lưu hiển thị model."
 }

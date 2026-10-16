@@ -283,5 +283,11 @@
   "m282": "Elimina fornitore",
   "m283": "Provider connessi",
   "m284": "Nessun provider ancora.",
-  "m285": "Modifica"
+  "m285": "Modifica",
+  "m286": "Mostra nel selettore modelli",
+  "m287": "I nuovi modelli sono nascosti per impostazione predefinita. Attiva, salva e ricarica OpenCode. Solo per questo browser.",
+  "m288": "Ricarica OpenCode",
+  "m289": "L'archiviazione del browser non è disponibile. Consentila e riprova.",
+  "m290": "Le modifiche vengono salvate automaticamente in questo browser. Ricarica OpenCode per applicarle.",
+  "m291": "Visibilità dei modelli salvata."
 }

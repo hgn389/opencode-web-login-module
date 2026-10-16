@@ -283,5 +283,11 @@
   "m282": "Anbieter löschen",
   "m283": "Verbundene Anbieter",
   "m284": "Noch keine Anbieter vorhanden.",
-  "m285": "Bearbeiten"
+  "m285": "Bearbeiten",
+  "m286": "In Modellauswahl anzeigen",
+  "m287": "Neue Modelle sind standardmäßig ausgeblendet. Aktivieren, speichern und OpenCode neu laden. Gilt nur für diesen Browser.",
+  "m288": "OpenCode neu laden",
+  "m289": "Browserspeicher nicht verfügbar. Speicherung erlauben und erneut versuchen.",
+  "m290": "Änderungen werden in diesem Browser automatisch gespeichert. Zum Anwenden OpenCode neu laden.",
+  "m291": "Modellsichtbarkeit gespeichert."
 }

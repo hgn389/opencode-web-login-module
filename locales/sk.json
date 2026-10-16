@@ -283,5 +283,11 @@
   "m282": "Odstrániť poskytovateľa",
   "m283": "Pripojení poskytovatelia",
   "m284": "Zatiaľ žiadni poskytovatelia.",
-  "m285": "Upraviť"
+  "m285": "Upraviť",
+  "m286": "Zobraziť vo výbere modelov",
+  "m287": "Nové modely sú predvolene skryté. Zapnite, uložte a znova načítajte OpenCode. Platí len pre tento prehliadač.",
+  "m288": "Znova načítať OpenCode",
+  "m289": "Úložisko prehliadača nie je dostupné. Povoľte ukladanie a skúste to znova.",
+  "m290": "Zmeny sa v tomto prehliadači ukladajú automaticky. Na použitie znova načítajte OpenCode.",
+  "m291": "Viditeľnosť modelov bola uložená."
 }

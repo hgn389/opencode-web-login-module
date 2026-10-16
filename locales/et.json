@@ -283,5 +283,11 @@
   "m282": "Kustuta pakkuja",
   "m283": "Ühendatud teenusepakkujad",
   "m284": "Teenusepakkujaid veel pole.",
-  "m285": "Muuda"
+  "m285": "Muuda",
+  "m286": "Näita mudelivalikus",
+  "m287": "Uued mudelid on vaikimisi peidetud. Lülita sisse, salvesta ja laadi OpenCode uuesti. Kehtib ainult selles brauseris.",
+  "m288": "Laadi OpenCode uuesti",
+  "m289": "Brauseri salvestusruum pole saadaval. Luba salvestamine ja proovi uuesti.",
+  "m290": "Muudatused salvestatakse selles brauseris automaatselt. Rakendamiseks laadi OpenCode uuesti.",
+  "m291": "Mudelite nähtavus salvestatud."
 }

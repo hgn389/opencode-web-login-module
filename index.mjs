@@ -37,7 +37,7 @@ export function createLoginServer(options = {}) {
   const loginScript = readFileSync(new URL('./login-client.js', import.meta.url), 'utf8');
   const localeAssets = new Map(['i18n-client.js', 'i18n-core.mjs'].map(file => ['/login/' + file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const adminPage = readFileSync(new URL('./admin.html', import.meta.url), 'utf8').replaceAll('{{VERSION}}', escapeHtml(moduleVersion));
-  const adminAssets = new Map(['admin-ui.js', 'settings-hook.js', 'settings-hook.css'].map(file => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
+  const adminAssets = new Map(['admin-ui.js', 'model-visibility.mjs', 'settings-hook.js', 'settings-hook.css'].map(file => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]));
   const state = new SecurityStore(config.statePath);
   const shutdown = new AbortController();
   const csrfKey = state.csrfKey;

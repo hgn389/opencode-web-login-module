@@ -283,5 +283,11 @@
   "m282": "Slett leverandør",
   "m283": "Tilkoblede leverandører",
   "m284": "Ingen leverandører ennå.",
-  "m285": "Rediger"
+  "m285": "Rediger",
+  "m286": "Vis i modellvelgeren",
+  "m287": "Nye modeller er skjult som standard. Aktiver, lagre og last inn OpenCode på nytt. Gjelder bare denne nettleseren.",
+  "m288": "Last inn OpenCode på nytt",
+  "m289": "Nettleserlagring er utilgjengelig. Tillat lagring og prøv igjen.",
+  "m290": "Endringer lagres automatisk i denne nettleseren. Last inn OpenCode på nytt for å bruke dem.",
+  "m291": "Modellvisning lagret."
 }

@@ -283,5 +283,11 @@
   "m282": "Ištrinti teikėją",
   "m283": "Prijungti teikėjai",
   "m284": "Teikėjų dar nėra.",
-  "m285": "Redaguoti"
+  "m285": "Redaguoti",
+  "m286": "Rodyti modelių parinkiklyje",
+  "m287": "Nauji modeliai pagal numatymą paslėpti. Įjunkite, išsaugokite ir iš naujo įkelkite OpenCode. Tik šiai naršyklei.",
+  "m288": "Iš naujo įkelti OpenCode",
+  "m289": "Naršyklės saugykla nepasiekiama. Leiskite saugoti ir bandykite dar kartą.",
+  "m290": "Pakeitimai automatiškai išsaugomi šioje naršyklėje. Norėdami pritaikyti, iš naujo įkelkite OpenCode.",
+  "m291": "Modelių matomumas išsaugotas."
 }

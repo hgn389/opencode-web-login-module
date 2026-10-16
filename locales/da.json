@@ -283,5 +283,11 @@
   "m282": "Slet udbyder",
   "m283": "Tilsluttede udbydere",
   "m284": "Ingen udbydere endnu.",
-  "m285": "Rediger"
+  "m285": "Rediger",
+  "m286": "Vis i modelvælgeren",
+  "m287": "Nye modeller er som standard skjult. Aktivér, gem og genindlæs OpenCode. Gælder kun denne browser.",
+  "m288": "Genindlæs OpenCode",
+  "m289": "Browserlager er ikke tilgængeligt. Tillad lagring, og prøv igen.",
+  "m290": "Ændringer gemmes automatisk i denne browser. Genindlæs OpenCode for at anvende dem.",
+  "m291": "Modelvisning gemt."
 }

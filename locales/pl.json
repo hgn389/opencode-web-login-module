@@ -283,5 +283,11 @@
   "m282": "Usuń dostawcę",
   "m283": "Połączeni dostawcy",
   "m284": "Brak dostawców.",
-  "m285": "Edytuj"
+  "m285": "Edytuj",
+  "m286": "Pokaż na liście modeli",
+  "m287": "Nowe modele są domyślnie ukryte. Włącz, zapisz i odśwież OpenCode. Dotyczy tylko tej przeglądarki.",
+  "m288": "Odśwież OpenCode",
+  "m289": "Pamięć przeglądarki jest niedostępna. Zezwól na zapis i spróbuj ponownie.",
+  "m290": "Zmiany są zapisywane automatycznie w tej przeglądarce. Odśwież OpenCode, aby je zastosować.",
+  "m291": "Zapisano widoczność modeli."
 }

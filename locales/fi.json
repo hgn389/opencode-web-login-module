@@ -283,5 +283,11 @@
   "m282": "Poista palveluntarjoaja",
   "m283": "Yhdistetyt palveluntarjoajat",
   "m284": "Palveluntarjoajia ei vielä ole.",
-  "m285": "Muokkaa"
+  "m285": "Muokkaa",
+  "m286": "Näytä mallivalitsimessa",
+  "m287": "Uudet mallit ovat oletuksena piilossa. Ota käyttöön, tallenna ja lataa OpenCode uudelleen. Koskee vain tätä selainta.",
+  "m288": "Lataa OpenCode uudelleen",
+  "m289": "Selaimen tallennustila ei ole käytettävissä. Salli tallennus ja yritä uudelleen.",
+  "m290": "Muutokset tallentuvat automaattisesti tähän selaimeen. Lataa OpenCode uudelleen ottaaksesi ne käyttöön.",
+  "m291": "Mallien näkyvyys tallennettu."
 }

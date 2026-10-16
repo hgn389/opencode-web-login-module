@@ -1,6 +1,6 @@
 {
   "name": "opencode-web-login",
-  "version": "1.2.1-beta",
+  "version": "1.2.2-beta",
   "description": "Reusable login and security gateway for OpenCode v2",
   "private": true,
   "license": "UNLICENSED",
@@ -16,7 +16,7 @@
     "index.mjs", "config.mjs", "security.mjs", "http-client.mjs", "cli.mjs", "server.mjs", "manage.mjs",
     "install.mjs", "login.html", "login-client.js", "admin-client.mjs", "admin-service.mjs", "provider-models.mjs", "update.mjs",
     "i18n-core.mjs", "i18n-server.mjs", "i18n-client.js", "locales.json", "locales/",
-    "admin.html", "admin-ui.js", "settings-hook.js", "settings-hook.css", "bin/", "assets/", "environment.example", "npm-shrinkwrap.json"
+    "admin.html", "admin-ui.js", "model-visibility.mjs", "settings-hook.js", "settings-hook.css", "bin/", "assets/", "environment.example", "npm-shrinkwrap.json"
   ],
   "dependencies": {
     "@napi-rs/canvas": "1.0.10",

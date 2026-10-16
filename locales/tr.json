@@ -283,5 +283,11 @@
   "m282": "Sağlayıcıyı sil",
   "m283": "Bağlı sağlayıcılar",
   "m284": "Henüz sağlayıcı yok.",
-  "m285": "Düzenle"
+  "m285": "Düzenle",
+  "m286": "Model seçicide göster",
+  "m287": "Yeni modeller varsayılan olarak gizlidir. Etkinleştirin, kaydedin ve OpenCode'u yeniden yükleyin. Yalnızca bu tarayıcı için geçerlidir.",
+  "m288": "OpenCode'u yeniden yükle",
+  "m289": "Tarayıcı depolaması kullanılamıyor. Depolamaya izin verip tekrar deneyin.",
+  "m290": "Değişiklikler bu tarayıcıda otomatik kaydedilir. Uygulamak için OpenCode'u yeniden yükleyin.",
+  "m291": "Model görünürlüğü kaydedildi."
 }

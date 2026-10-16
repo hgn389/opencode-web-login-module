@@ -283,5 +283,11 @@
   "m282": "Ta bort leverantör",
   "m283": "Anslutna leverantörer",
   "m284": "Inga leverantörer ännu.",
-  "m285": "Redigera"
+  "m285": "Redigera",
+  "m286": "Visa i modellväljaren",
+  "m287": "Nya modeller är dolda som standard. Aktivera, spara och ladda om OpenCode. Gäller bara den här webbläsaren.",
+  "m288": "Ladda om OpenCode",
+  "m289": "Webbläsarlagring är inte tillgänglig. Tillåt lagring och försök igen.",
+  "m290": "Ändringar sparas automatiskt i den här webbläsaren. Ladda om OpenCode för att tillämpa dem.",
+  "m291": "Modellernas synlighet sparad."
 }

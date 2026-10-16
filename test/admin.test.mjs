@@ -198,6 +198,7 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
   try {
     assert.equal((await fetch(origin + '/web-login/api/status')).status, 401);
     assert.equal((await fetch(origin + '/web-login/admin-ui.js')).status, 401);
+    assert.equal((await fetch(origin + '/web-login/model-visibility.mjs')).status, 401);
     assert.equal((await request('/web-login/api/status', { headers: { origin: 'https://attacker.example' } })).status, 403);
     assert.equal(calls, 0);
     const status = await (await request('/web-login/api/status')).json();
@@ -215,6 +216,8 @@ test('web admin protects session, origin and CSRF; password rotation revokes all
     assert(panelBody.includes(`OpenCode Web Login · v${version}`));
     assert(!panelBody.includes('{{VERSION}}'));
     assert.equal((await request('/web-login/admin-ui.js')).status, 200);
+    const visibilityAsset = await request('/web-login/model-visibility.mjs');
+    assert.equal(visibilityAsset.status, 200); assert(visibilityAsset.headers.get('content-type').includes('javascript'));
     const anonymous = await fetch(origin + '/web-login/api/password', options);
     assert.equal(anonymous.status, 401); assert.equal(store.state('127.0.0.1').failures, 0);
     store.fail('127.0.0.1');

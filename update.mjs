@@ -17,7 +17,7 @@ export const packageForOpenCode = version => {
   if (!supportedOpenCodeVersion(version)) throw new Error('Unsupported OpenCode version');
   return versionParts(version).core[0] === 1 ? legacyOpenCodePackage : openCodePackage;
 };
-export const moduleFiles = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'login-client.js', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt', 'admin-client.mjs', 'admin-service.mjs', 'provider-models.mjs', 'admin.html', 'admin-ui.js', 'settings-hook.js', 'settings-hook.css', 'update.mjs', 'i18n-core.mjs', 'i18n-server.mjs', 'i18n-client.js', 'locales.json', ...languages.map(language => `locales/${language.code}.json`)];
+export const moduleFiles = ['package.json', 'npm-shrinkwrap.json', 'index.mjs', 'config.mjs', 'security.mjs', 'http-client.mjs', 'cli.mjs', 'server.mjs', 'manage.mjs', 'install.mjs', 'login.html', 'login-client.js', 'README.md', 'environment.example', 'bin/opencode-web-login.mjs', 'assets/DejaVuSans-Bold.ttf', 'assets/LICENSE-fonts.txt', 'admin-client.mjs', 'admin-service.mjs', 'provider-models.mjs', 'admin.html', 'admin-ui.js', 'model-visibility.mjs', 'settings-hook.js', 'settings-hook.css', 'update.mjs', 'i18n-core.mjs', 'i18n-server.mjs', 'i18n-client.js', 'locales.json', ...languages.map(language => `locales/${language.code}.json`)];
 
 export function versionParts(value) {
   if (typeof value !== 'string') return;

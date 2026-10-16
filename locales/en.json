@@ -283,5 +283,11 @@
   "m282": "Delete provider",
   "m283": "Connected providers",
   "m284": "No providers yet.",
-  "m285": "Edit"
+  "m285": "Edit",
+  "m286": "Show in model selector",
+  "m287": "New models are hidden by default. Enable, save, then reload OpenCode. Applies to this browser only.",
+  "m288": "Reload OpenCode",
+  "m289": "Browser storage is unavailable. Allow storage and try again.",
+  "m290": "Changes are saved automatically in this browser. Reload OpenCode to apply.",
+  "m291": "Model visibility saved."
 }

@@ -1,4 +1,5 @@
 import { i18n } from '/login/i18n-client.js';
+import { modelPreferenceKey, readModelPreferences, modelVisible, saveModelVisibility, saveModelVisibilityBatch } from '/web-login/model-visibility.mjs';
 
 (() => {
   'use strict';
@@ -12,9 +13,12 @@ import { i18n } from '/login/i18n-client.js';
   document.querySelectorAll('form button, #check-update, #native-check').forEach(button => { button.disabled = true; });
   let csrf, busy = false, available = false, timer, reconnecting = false, watchingJob = false, nativeInfo, nativeLocked;
   let providerData, providerRevision, providerLocked, providerPendingId;
+  let providerPendingVisibility, providerVisibilityRetry, modelPreferences, providerSubmitting = false;
   const providerForm = document.querySelector('#provider-form');
   const providerEditor = document.querySelector('#provider-editor');
   const providerList = document.querySelector('#provider-list');
+  const visibilityModels = document.querySelector('#provider-visibility-models');
+  let visibilityCatalogKey = '';
   const noticeHome = notice.parentNode, noticeAnchor = notice.nextSibling;
   let selectedProviderId = '', editorTrigger;
   const maximumProviderModels = 2000;
@@ -89,8 +93,17 @@ import { i18n } from '/login/i18n-client.js';
     if (providersPage) {
       providerData = data.providers || {}; providerLocked = locked;
       renderProviders();
-      if (providerPendingId !== undefined && data.job?.phase === 'succeeded') { providerPendingId = undefined; closeProviderEditor(); }
-      if (data.job?.phase === 'failed') providerPendingId = undefined;
+      let savedProvider;
+      if (providerPendingId !== undefined && data.job?.phase === 'succeeded') {
+        const id = providerPendingId; providerPendingId = undefined;
+        savedProvider = id;
+        providerVisibilityRetry = providerPendingVisibility; providerPendingVisibility = undefined;
+        document.querySelector('#provider-visibility-apply').hidden = false;
+        applyProviderVisibility();
+        if (providerEditor.open && providerForm.elements.providerId.value.trim() === id) closeProviderEditor();
+      }
+      if (data.job?.phase === 'failed') { providerPendingId = undefined; providerPendingVisibility = undefined; }
+      renderProviderVisibility(savedProvider);
       i18n.text(document.querySelector('#provider-info'), () => (providerData.supported ? '' : providerData.reason || 'Chưa đọc được cấu hình nhà cung cấp.'));
       i18n.text(document.querySelector('#provider-job'), () => (data.job?.type === 'providers' && data.job.phase !== 'succeeded' ? data.job.message || '' : ''));
       lockProvider(); return;
@@ -161,7 +174,86 @@ import { i18n } from '/login/i18n-client.js';
     providerForm.elements.remove.disabled = disabled || !selectedProviderId;
     document.querySelector('#provider-add-model').disabled = disabled || modelRows().length >= maximumProviderModels;
     providerForm.elements.apiKey.disabled = locked || busy && !automaticScanning || providerForm.elements.clearKey.checked;
+    for (const row of modelRows()) row.querySelector('[data-model-visible]').disabled ||= !row.querySelector('[data-model-selected]').checked;
+    document.querySelector('#provider-visibility-reload').disabled = busy || providerPendingId !== undefined;
+    const noModels = !visibilityModels.querySelector('input');
+    document.querySelectorAll('#provider-visibility-controls input, #provider-visibility-controls .visibility-bulk').forEach(control => { control.disabled = disabled || noModels; });
+    if (providersPage && window.parent !== window) window.parent.postMessage({ type: 'web-login-provider-pending', pending: providerSubmitting || providerPendingId !== undefined }, location.origin);
   }
+  function applyProviderVisibility() {
+    if (!providerVisibilityRetry) return true;
+    try {
+      const { id, choices, remove } = providerVisibilityRetry;
+      saveModelVisibility(localStorage, id, choices, remove); providerVisibilityRetry = undefined;
+      return true;
+    } catch { message('Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.'); return false; }
+  }
+  document.querySelector('#provider-visibility-reload').addEventListener('click', () => {
+    if (!applyProviderVisibility()) return;
+    if (window.parent !== window && window.frameElement?.closest('.web-login-dialog')) window.parent.location.reload();
+    else location.href = '/';
+  });
+  function syncVisibilitySwitches() {
+    const preferences = readModelPreferences(localStorage);
+    for (const input of visibilityModels.querySelectorAll('input')) input.checked = modelVisible(preferences, input.dataset.visibilityProvider, input.dataset.visibilityModel);
+  }
+  function renderProviderVisibility(preferred) {
+    const providers = (providerData.providers || []).filter(provider => /^[a-z0-9][a-z0-9_-]{0,62}$/.test(provider.id) && provider.models?.length);
+    if (providers.length) document.querySelector('#provider-visibility-apply').hidden = false;
+    const key = JSON.stringify(providers.map(({ id, name, models }) => [id, name, models]));
+    if (key !== visibilityCatalogKey || preferred) {
+      visibilityCatalogKey = key;
+      renderVisibilityModels(providers);
+    } else {
+      try { syncVisibilitySwitches(); } catch { /* Keep the current controls when storage is temporarily unavailable. */ }
+    }
+  }
+  function renderVisibilityModels(providers) {
+    visibilityModels.replaceChildren();
+    document.querySelector('#provider-visibility-empty').hidden = Boolean(providers.length);
+    let preferences;
+    try { preferences = readModelPreferences(localStorage); }
+    catch { message('Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.'); return; }
+    const fragment = document.createDocumentFragment();
+    for (const provider of providers) {
+      const group = document.createElement('section'); group.className = 'provider-visibility-group'; group.dataset.visibilityGroup = provider.id;
+      const heading = document.createElement('h3'); heading.id = `visibility-group-${provider.id}`; heading.textContent = provider.name || provider.id;
+      group.setAttribute('aria-labelledby', heading.id);
+      const providerID = document.createElement('code'); providerID.className = 'provider-visibility-provider-id'; providerID.textContent = provider.id; providerID.dir = 'ltr';
+      group.append(heading, providerID);
+      for (const model of provider.models) {
+        const row = document.createElement('label'); row.className = 'model-visibility provider-visibility-row';
+        const text = document.createElement('span'); text.className = 'provider-visibility-name';
+        const name = document.createElement('strong'); name.textContent = model.name || model.id;
+        const id = document.createElement('code'); id.textContent = model.id; id.dir = 'ltr'; text.append(name, id);
+        const input = document.createElement('input'); input.type = 'checkbox'; input.setAttribute('role', 'switch'); input.dataset.visibilityProvider = provider.id; input.dataset.visibilityModel = model.id; input.checked = modelVisible(preferences, provider.id, model.id);
+        i18n.attr(input, 'aria-label', () => `${i18n.t('Hiển thị trong bộ chọn')} · ${provider.name || provider.id} · ${model.name || model.id} · ${model.id}`);
+        const track = document.createElement('span'); track.className = 'model-switch-track'; track.setAttribute('aria-hidden', 'true');
+        input.addEventListener('change', () => { if (!saveVisibilityChoices([{ providerID: provider.id, choices: [{ modelID: model.id, visible: input.checked }] }])) input.checked = !input.checked; });
+        row.append(text, input, track); group.append(row);
+      }
+      fragment.append(group);
+    }
+    visibilityModels.append(fragment); i18n.prune();
+  }
+  function saveVisibilityChoices(groups) {
+    if (busy || providerLocked || !available || !groups.length) return false;
+    try {
+      if (!applyProviderVisibility()) return false;
+      saveModelVisibilityBatch(localStorage, groups);
+      document.querySelector('#provider-visibility-apply').hidden = false;
+      message('Đã lưu hiển thị model.'); return true;
+    } catch { message('Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.'); return false; }
+  }
+  for (const [id, visible] of [['#provider-visibility-all', true], ['#provider-visibility-none', false]]) document.querySelector(id).addEventListener('click', () => {
+    const groups = [...visibilityModels.querySelectorAll('[data-visibility-group]')].map(group => ({ providerID: group.dataset.visibilityGroup, choices: [...group.querySelectorAll('input')].map(input => ({ modelID: input.dataset.visibilityModel, visible })) }));
+    if (saveVisibilityChoices(groups)) syncVisibilitySwitches();
+  });
+  window.addEventListener('storage', event => {
+    if (providersPage && (event.key === modelPreferenceKey || event.key === null)) {
+      try { syncVisibilitySwitches(); } catch { /* Do not replace preferences from an invalid storage event. */ }
+    }
+  });
   function renderProviders() {
     const fragment = document.createDocumentFragment();
     for (const provider of providerData.providers || []) {
@@ -191,6 +283,9 @@ import { i18n } from '/login/i18n-client.js';
     if (busy || !available || providerLocked || !providerData?.supported) return;
     const provider = providerData.providers?.find(provider => provider.id === id);
     if (id && !provider?.editable) return;
+    if (providerVisibilityRetry && !applyProviderVisibility()) return;
+    try { modelPreferences = readModelPreferences(localStorage); }
+    catch { message('Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.'); return; }
     editorTrigger = document.activeElement;
     fillProvider(id);
     providerEditor.toggleAttribute('data-delete', deleting);
@@ -231,21 +326,42 @@ import { i18n } from '/login/i18n-client.js';
       const label = document.createElement('label');
       const caption = document.createElement('span'); caption.className = 'model-field-caption'; i18n.text(caption, () => title);
       const input = document.createElement('input'); input.type = 'text'; input.maxLength = 128; input.dataset.modelField = field; input.value = model[field] || ''; input.required = field === 'id' && selected; input.autocomplete = 'off'; input.dir = field === 'id' ? 'ltr' : 'auto';
-      input.addEventListener('input', () => { providerForm.elements.acknowledge.checked = false; if (field === 'id') i18n.attr(checkbox, 'aria-label', () => (`Chọn model ${input.value || i18n.t('mới')}`)); });
+      input.addEventListener('input', () => {
+        providerForm.elements.acknowledge.checked = false;
+        if (field === 'id') {
+          i18n.attr(checkbox, 'aria-label', () => (`Chọn model ${input.value || i18n.t('mới')}`));
+          // Renaming creates a new model; require an explicit visibility choice again.
+          visibility.checked = savedModelVisible(input.value.trim());
+          labelVisibility();
+        }
+      });
       label.append(caption, input); row.append(label);
     }
-    checkbox.addEventListener('change', () => { row.querySelector('[data-model-field=id]').required = checkbox.checked; providerForm.elements.acknowledge.checked = false; modelCount(); });
+    const visibilityLabel = document.createElement('label'); visibilityLabel.className = 'model-visibility';
+    const visibilityCaption = document.createElement('span'); visibilityCaption.className = 'model-field-caption'; i18n.text(visibilityCaption, 'Hiển thị trong bộ chọn');
+    const visibility = document.createElement('input'); visibility.type = 'checkbox'; visibility.setAttribute('role', 'switch'); visibility.dataset.modelVisible = ''; visibility.checked = savedModelVisible(model.id);
+    const track = document.createElement('span'); track.className = 'model-switch-track'; track.setAttribute('aria-hidden', 'true');
+    const labelVisibility = () => {
+      i18n.attr(visibility, 'aria-label', () => `${i18n.t('Hiển thị trong bộ chọn')} · ${row.querySelector('[data-model-field=id]').value || i18n.t('mới')}`);
+    };
+    visibility.addEventListener('change', () => { row.dataset.visibilityChanged = 'true'; providerForm.elements.acknowledge.checked = false; });
+    visibilityLabel.append(visibilityCaption, visibility, track); row.append(visibilityLabel); labelVisibility();
+    checkbox.addEventListener('change', () => { row.querySelector('[data-model-field=id]').required = checkbox.checked; providerForm.elements.acknowledge.checked = false; lockProvider(); modelCount(); });
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'model-remove'; remove.textContent = '×'; i18n.attr(remove, 'aria-label', 'Bỏ model'); i18n.attr(remove, 'title', 'Bỏ model');
     remove.addEventListener('click', () => {
       if (modelRows().length > 1) row.remove();
-      else { row.querySelectorAll('[data-model-field]').forEach(input => { input.value = ''; }); checkbox.checked = true; row.querySelector('[data-model-field=id]').required = true; }
+      else { row.querySelectorAll('[data-model-field]').forEach(input => { input.value = ''; }); checkbox.checked = true; visibility.checked = false; labelVisibility(); row.querySelector('[data-model-field=id]').required = true; }
       providerForm.elements.acknowledge.checked = false; lockProvider(); modelCount(); i18n.prune();
     });
     row.append(remove); container.append(row);
   }
   function chooseModels(selected) {
     for (const row of modelRows()) { row.querySelector('[data-model-selected]').checked = selected; row.querySelector('[data-model-field=id]').required = selected; }
-    providerForm.elements.acknowledge.checked = false; modelCount();
+    providerForm.elements.acknowledge.checked = false; lockProvider(); modelCount();
+  }
+  function savedModelVisible(id) {
+    // Newly scanned/added IDs stay hidden until their switch is enabled, even if an old preference exists.
+    return Boolean(selectedProviderId && providerData?.providers?.find(provider => provider.id === selectedProviderId)?.models?.some(model => model.id === id) && modelVisible(modelPreferences, selectedProviderId, id));
   }
   function fillProvider(id) {
     clearTimeout(autoScanTimer); connectionVersion++; scannedVersion = -1;
@@ -340,24 +456,30 @@ import { i18n } from '/login/i18n-client.js';
   }
   document.querySelector('#provider-scan-models').addEventListener('click', scanModels);
   window.addEventListener('pagehide', () => { clearTimeout(toastTimer); clearTimeout(autoScanTimer); clearTimeout(timer); notice.hidden = true; });
+  window.addEventListener('beforeunload', event => { if (providersPage && (providerSubmitting || providerPendingId !== undefined)) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('pageshow', event => { if (event.persisted) refreshWithRetry(); });
   providerForm.addEventListener('submit', async event => {
     event.preventDefault(); if (!providerEditor.open || busy || !available || !providerData?.supported || providerLocked) return;
     if (!providerForm.elements.acknowledge.checked) { message('Vui lòng tải lại danh sách và xác nhận đồng ý tải lại cấu hình OpenCode.'); return; }
     const remove = providerEditor.hasAttribute('data-delete') || event.submitter?.name === 'remove', id = providerForm.elements.providerId.value.trim();
     const fields = { acknowledge: true, revision: providerRevision };
+    const existingIDs = new Set(providerData?.providers?.find(provider => provider.id === id)?.models?.map(model => model.id) || []);
+    const visibility = { id, remove, choices: remove ? [] : modelRows().filter(row => row.querySelector('[data-model-selected]').checked && (row.dataset.visibilityChanged === 'true' || !existingIDs.has(row.querySelector('[data-model-field=id]').value.trim()))).map(row => ({ modelID: row.querySelector('[data-model-field=id]').value.trim(), visible: row.querySelector('[data-model-visible]').checked })) };
     if (remove) fields.id = id;
     else fields.provider = { id, name: providerForm.elements.providerName.value.trim(), baseURL: providerForm.elements.baseURL.value.trim(), apiKey: providerForm.elements.apiKey.value.trim(), clearKey: providerForm.elements.clearKey.checked, allowHttp: providerForm.elements.allowHttp.checked,
       models: modelRows().filter(row => row.querySelector('[data-model-selected]').checked).map(row => Object.fromEntries([...row.querySelectorAll('[data-model-field]')].map(input => [input.dataset.modelField, input.value.trim()]))) };
     if (!remove && !fields.provider.models.length) { message('Hãy chọn ít nhất một model trước khi lưu nhà cung cấp.'); return; }
-    busy = true; lockProvider();
+    busy = true; providerSubmitting = true; lockProvider();
     try {
+      // Reject unavailable/malformed browser preferences before changing server configuration.
+      try { readModelPreferences(localStorage); }
+      catch { throw new Error('Không truy cập được bộ nhớ trình duyệt. Hãy cho phép lưu trữ rồi thử lại.'); }
       await refresh();
       const data = await call(remove ? 'provider-remove' : 'provider-save', fields);
       providerForm.elements.apiKey.value = ''; providerForm.elements.acknowledge.checked = false;
-      watchingJob = true; providerPendingId = id; message(data.message);
+      watchingJob = true; providerPendingId = id; providerPendingVisibility = visibility; message(data.message);
     } catch (error) { message(error.message); }
-    finally { busy = false; refreshWithRetry(); }
+    finally { busy = false; providerSubmitting = false; refreshWithRetry(); }
   });
   async function refresh() { draw(await call(nativePage ? 'opencode-status' : providersPage ? 'providers-status' : 'status')); }
   for (const [selector, operation] of [['#check-update', 'check'], ['#native-check', 'opencode-check']]) document.querySelector(selector).addEventListener('click', async event => {

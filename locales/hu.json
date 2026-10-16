@@ -283,5 +283,11 @@
   "m282": "Szolgáltató törlése",
   "m283": "Csatlakoztatott szolgáltatók",
   "m284": "Még nincsenek szolgáltatók.",
-  "m285": "Szerkesztés"
+  "m285": "Szerkesztés",
+  "m286": "Megjelenítés a modellválasztóban",
+  "m287": "Az új modellek alapértelmezés szerint rejtettek. Kapcsolja be, mentse, majd töltse újra az OpenCode-ot. Csak erre a böngészőre vonatkozik.",
+  "m288": "OpenCode újratöltése",
+  "m289": "A böngésző tárhelye nem érhető el. Engedélyezze a tárolást, és próbálja újra.",
+  "m290": "A módosítások automatikusan mentődnek ebben a böngészőben. Alkalmazásukhoz töltse újra az OpenCode-ot.",
+  "m291": "A modellek láthatósága mentve."
 }
